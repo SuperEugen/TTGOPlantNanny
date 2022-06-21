@@ -1,13 +1,13 @@
 //***************************************************************************************************
-//  plant_nanny:  Cheap indoor plant watering system for an ESP32. No soil moisture sensors.
-//                Water is delivered by a timer controlled pump for each individual plant.
-//                No valves but a simple water pump for each plant. Up to five plants per system.
-//                System can be controlled via MQTT commands and reports remaining battery and
-//                water level in tank. Remaining water level is not measured with sensors
-//                but calculated according to cummulated pump time.
-//                I tried to stick to just the two built-in buttons for the user interface.
+//  TTGOPlantNanny: Cheap indoor plant watering system for an ESP32. No soil moisture sensors.
+//                  Water is delivered by a timer controlled pump for each individual plant.
+//                  No valves but a simple water pump for each plant. Up to five plants per system.
+//                  System can be controlled via MQTT commands and reports remaining battery and
+//                  water level in tank. Remaining water level is not measured with sensors
+//                  but calculated according to cummulated pump time.
+//                  I tried to stick to just the two built-in buttons for the user interface.
 // 
-//                By Ingo Hoffmann.
+//                  By Ingo Hoffmann.
 //***************************************************************************************************
 //
 //  Hardware components:
@@ -45,11 +45,11 @@
 //    05.09.2019, IH:         buttons integrated
 //    06.09.2019, IH:         deep sleep
 //    08.09.2019, IH:         time drift compensation
-//    09.09.2019, IH:         
+//    21.06.2022, IH:         revisit of project
 //
 //***************************************************************************************************
 
-#define VERSION               "0.2"   // 09.09.19
+#define VERSION               "0.3"   // 21.06.22
 
 // libraries
 #include <Preferences.h>
@@ -430,7 +430,7 @@ void showScreen() {
 void getNetworkTime() {
   waitForSync();                    // Wait for ezTime to get its time synchronized
   myTZ.setLocation(F(timezone));
-  setInterval(60 * 60 * 24);        // set NTP polling interval to daily
+  setInterval(uint16_t(86400));      // 86400 = 60 * 60 * 24, set NTP polling interval to daily
   setDebug(NONE);                   // NONE = set ezTime to quiet
 }
 

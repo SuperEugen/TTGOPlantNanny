@@ -3,7 +3,7 @@
 //***************************************************************************************************
 
 // see texts.h for available options
-#define LANG                      'DE'                      // debug in english, tft as defined here
+#define LANG                      'G'                      // debug in english, tft as defined here
 
 // Pin connections
 #define PUMP_1                    22
