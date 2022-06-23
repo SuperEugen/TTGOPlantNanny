@@ -1,7 +1,7 @@
 //***************************************************************************************************
 //  TTGOPlantNanny: Cheap indoor plant watering system for an ESP32. No soil moisture sensors.
 //                  Water is delivered by a timer controlled pump for each individual plant.
-//                  No valves but a simple water pump for each plant. Up to five plants per system.
+//                  No valves but a simple water pump for each plant. Up to four plants per system.
 //                  System can be controlled via MQTT commands and reports remaining battery and
 //                  water level in tank. Remaining water level is not measured with sensors
 //                  but calculated according to cummulated pump time.
@@ -42,24 +42,15 @@
 //    05.09.2019, IH:         buttons integrated
 //    06.09.2019, IH:         deep sleep
 //    08.09.2019, IH:         time drift compensation
-//    21.06.2022, IH:         revisit of project
+//    23.06.2022, IH:         revisit of project
 //
 //***************************************************************************************************
 
-#define VERSION               "0.4"   // 22.06.22
+#define VERSION               "0.4"   // 23.06.22
 
 // libraries
 #include <Preferences.h>
 #include <TFT_eSPI.h>
-
-#ifndef TFT_DISPOFF
-#define TFT_DISPOFF 0x28
-#endif
-
-#ifndef TFT_SLPIN
-#define TFT_SLPIN   0x10
-#endif
-
 #include "Free_Fonts.h"
 #include <Button2.h>
 #include "esp_adc_cal.h"
@@ -74,13 +65,6 @@
 #include "settings.h"
 #include "texts.h"
 
-// Pin connections for built-in hardware
-#define ADC_EN                14
-#define ADC_PIN               34
-#define BTN_TOP               35
-#define BTN_BOTTOM            0
-#define TFT_BL                4       // backlight is PWM controllable
-
 // defines
 #define FS_NO_GLOBALS
 
@@ -90,8 +74,6 @@
 const uint8_t layoutButtonWidth = 64;
 const uint8_t layoutInfoBarHeight = 24;
 const uint8_t layoutStatusBarHeight = 15;
-
-const uint8_t numberOfPumps = 4;
 
 //***************************************************************************************************
 //  Global data
@@ -103,8 +85,6 @@ Button2 btnB(BTN_BOTTOM);
 WiFiClient wifiClient;
 Timezone myTZ;
 PubSubClient mqttClient(wifiClient);
-
-int vref = 1100;                            // for battery level measurement
 
 bool wifiConnected = false;
 bool mqttConnected = false;
@@ -123,8 +103,9 @@ uint8_t wateringHour;
 uint16_t containerSize;
 uint16_t remainingWater;
 uint16_t pumpThroughput;
-uint16_t hoursBetweenWaterings[numberOfPumps];
-uint16_t hoursTillWatering[numberOfPumps];
+uint16_t hoursBetweenWaterings[NUMBER_OF_PUMPS];
+uint16_t hoursTillWatering[NUMBER_OF_PUMPS];
+uint16_t secondsOfWatering[NUMBER_OF_PUMPS];
 
 // preferences must be 15 characters at max
 #define PREF_WATERING_HOUR            "wh"
@@ -133,6 +114,7 @@ uint16_t hoursTillWatering[numberOfPumps];
 #define PREF_PUMP_THROUGHPUT          "pt"
 #define PREF_HOURS_BETWEEN_WATERINGS  "hb"
 #define PREF_HOURS_TILL_WATERING      "ht"
+#define PREF_SEC_WATERING_AMOUNT      "wa"
 
 //***************************************************************************************************
 //  Screens
@@ -168,6 +150,7 @@ void setup() {
   clearBottomBtn();
   showProgInfo();
   showSystemNumber();
+  showContainerSize();
 
   // connect and show status
   loadPrefs();
@@ -178,7 +161,7 @@ void setup() {
     showTime();
     connectAndShowMQTTStatus();
     showAndPublishBatteryLevel();
-    getAndShowContainerStatus();
+    showAndPublishWaterLevel();
   
     // configure pins
     pinMode(PUMP_1, OUTPUT);
@@ -250,10 +233,10 @@ void loadPrefs() {
   remainingWater = prefs.getUInt(PREF_REMAINING_WATER, CONTAINER_SIZE_SMALL);
   Serial.print("Load from prefs: remainingWater = ");
   Serial.println(String(remainingWater));
-  pumpThroughput = prefs.getUInt(PREF_PUMP_THROUGHPUT, PUMP_VERTICAL);
+  pumpThroughput = prefs.getUInt(PREF_PUMP_THROUGHPUT, PUMP_BLACK);
   Serial.print("Load from prefs: pumpThroughput = ");
   Serial.println(String(pumpThroughput));
-  for(int i = 0; i < numberOfPumps; i++) {
+  for(int i = 0; i < NUMBER_OF_PUMPS; i++) {
     // 49 = ASCII '1'
     hoursBetweenWaterings[i] = prefs.getUInt(PREF_HOURS_BETWEEN_WATERINGS + char(49 + i), 
                                              DEFAULT_WATERING_FREQ);
@@ -268,6 +251,13 @@ void loadPrefs() {
     Serial.print(String(i));
     Serial.print("] = ");
     Serial.println(String(hoursTillWatering[i]));
+    // 49 = ASCII '1'
+    secondsOfWatering[i] = prefs.getUInt(PREF_SEC_WATERING_AMOUNT + char(49 + i), 
+                                         DEFAULT_WATERING_AMOUNT);
+    Serial.print(", secondsOfWatering[");
+    Serial.print(String(i));
+    Serial.print("] = ");
+    Serial.println(String(secondsOfWatering[i]));
   }
   prefs.end();
 }
@@ -351,6 +341,14 @@ void showProgInfo() {
   strcat(temp, " ");
   strcat(temp, VERSION);
   tft.drawString(temp, xpos, ypos, GFXFF);
+}
+
+//***************************************************************************************************
+//  showContainerSize
+//  what size of container is used
+//***************************************************************************************************
+void showContainerSize() {
+
 }
 
 //***************************************************************************************************
@@ -545,7 +543,7 @@ void mqttSubscribeToTopics() {
   baseCommand.concat(mqttCommandHour);
   mqttClient.subscribe(baseCommand.c_str());
 
-  for(int i = 1; i <= numberOfPumps; i++) {
+  for(int i = 1; i <= NUMBER_OF_PUMPS; i++) {
     temp = pumpCommand;
     temp.concat(char(48 + i));    // 48 = ASCII '0'
     temp.concat("/");
@@ -586,7 +584,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     
   } else {
     pump = shortenedTopic.toInt();    // returns 0 if no number is found
-    if(pump <= 0 || pump > numberOfPumps) {
+    if(pump <= 0 || pump > NUMBER_OF_PUMPS) {
       Serial.print("MQTT command not recognized: ");
       Serial.println(shortenedTopic);
     } else {
@@ -674,21 +672,11 @@ void showAndPublishBatteryLevel() {
   esp_adc_cal_value_t val_type = esp_adc_cal_characterize((adc_unit_t)ADC_UNIT_1, 
                                                           (adc_atten_t)ADC1_CHANNEL_6, 
                                                           (adc_bits_width_t)ADC_WIDTH_BIT_12, 
-                                                          1100, 
+                                                          ADC_VREF, 
                                                           &adc_chars);
 
-  //Check type of calibration value used to characterize ADC
-  if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) {
-    Serial.printf("eFuse Vref:%u mV", adc_chars.vref);
-    vref = adc_chars.vref;
-  } else if (val_type == ESP_ADC_CAL_VAL_EFUSE_TP) {
-    Serial.printf("Two Point --> coeff_a:%umV coeff_b:%umV\n", adc_chars.coeff_a, adc_chars.coeff_b);
-  } else {
-    Serial.println("Default Vref: 1100mV");
-  }
-
   uint16_t v = analogRead(ADC_PIN);
-  float batteryVoltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1100.0);
+  float batteryVoltage = ((float)v / 4095.0) * 2.0 * 3.3 * (ADC_VREF / 1100.0);
 
   String voltage = "Bat.: " + String(batteryVoltage) + "V";
   Serial.println(voltage);
@@ -703,14 +691,14 @@ void showAndPublishBatteryLevel() {
   
   tft.drawXBitmap(xpos, ypos, iconBattery, iconWidth, iconHeight, color, COLOR_BG_INFO_BAR);
 
-  mqttPublishValue(mqttTopicVoltage, String(batteryVoltage));
+  mqttPublishValue(mqttTopicBatVoltage, String(batteryVoltage));
 }
 
 //***************************************************************************************************
-//  getAndShowContainerStatus
+//  showAndPublishWaterLevel
 //  
 //***************************************************************************************************
-void getAndShowContainerStatus() {
+void showAndPublishWaterLevel() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 1;
 
