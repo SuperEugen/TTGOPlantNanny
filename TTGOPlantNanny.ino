@@ -13,11 +13,8 @@
 //  Hardware components:
 //    TTGO T-Display:         ESP32 module with integrated 16bit color TFT with 240 x 135 pixel 
 //                            based on ST7789V chip and two buttons
-//    1 to 5 water pumps:     5v submersable electric water pumps
-//    5 x 
-//      tranistor, 
-//      capacitor,
-//      resistors:            to switch the power of the small motors (no relais)
+//    1 to 4 water pumps:     5v submersable electric water pumps
+//    1 x 4 relais board      to switch the USB power of the pumps
 //    4x AA battery holder:   supply for the electronic and the motors
 //    water tank:             IKEA box, electronics, motors and battery fit into the 3D printed lid
 //
@@ -49,7 +46,7 @@
 //
 //***************************************************************************************************
 
-#define VERSION               "0.3"   // 21.06.22
+#define VERSION               "0.4"   // 22.06.22
 
 // libraries
 #include <Preferences.h>
@@ -94,7 +91,7 @@ const uint8_t layoutButtonWidth = 64;
 const uint8_t layoutInfoBarHeight = 24;
 const uint8_t layoutStatusBarHeight = 15;
 
-const uint8_t numberOfPumps = 5;
+const uint8_t numberOfPumps = 4;
 
 //***************************************************************************************************
 //  Global data
@@ -188,7 +185,6 @@ void setup() {
     pinMode(PUMP_2, OUTPUT);
     pinMode(PUMP_3, OUTPUT);
     pinMode(PUMP_4, OUTPUT);
-    pinMode(PUMP_5, OUTPUT);
 
     // initialise buttons
     buttonsInit();
@@ -692,7 +688,7 @@ void showAndPublishBatteryLevel() {
   }
 
   uint16_t v = analogRead(ADC_PIN);
-  float batteryVoltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
+  float batteryVoltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1100.0);
 
   String voltage = "Bat.: " + String(batteryVoltage) + "V";
   Serial.println(voltage);

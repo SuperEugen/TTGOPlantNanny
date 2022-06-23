@@ -10,7 +10,14 @@
 #define PUMP_2                    17
 #define PUMP_3                    2
 #define PUMP_4                    15
-#define PUMP_5                    13
+
+#define ADC_PIN                   34
+
+// Battery measurement
+#define ADC_READS                 20
+#define ADC_RED_VAL               2000
+#define ADC_YELLOW_VAL            2500
+#define ADC_GREEN_VAL             3000
 
 // wifi settings
 const char *ssid =                SECRET_WIFI_SSID;
@@ -28,10 +35,6 @@ const char* timezone =            "Europe/Berlin";
 // system number
 #define NANNY_NUMBER              '1'
 
-// battery voltage levels in volt
-#define BATTERY_VERY_LOW          3.8
-#define BATTERY_LOW               4.0
-
 // water container sizes in milli liter (IKEA 365+)
 #define CONTAINER_SIZE_SMALL      2000
 #define CONTAINER_SIZE_TALL       4200
@@ -39,8 +42,6 @@ const char* timezone =            "Europe/Berlin";
 #define CONTAINER_SIZE_BIG        10600
 
 // water pump througput in milli liter / second
-#define PUMP_VERTICAL             18
-#define PUMP_HORIZONTAL           20
 #define PUMP_BLACK                10
 
 // default values
@@ -59,7 +60,7 @@ const char* mqttMainTopic =       "plant-nanny";          // followed by /NANNY_
 const char* mqttTopicContainer =  "container-size";
 const char* mqttTopicThroughput = "pump-throughput";
 const char* mqttTopicWater =      "water-level";
-const char* mqttTopicVoltage =    "battery-voltage";
+const char* mqttTopicValue =      "battery-value";
 const char* mqttTopicTime =       "watering-hour";
 const char* mqttTopicWait =       "watering-wait";        // per pump setting
 const char* mqttTopicFrequency =  "watering-frequency";   // per pump setting
