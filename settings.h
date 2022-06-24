@@ -8,10 +8,10 @@
 // Pin connections pump relais
 #define NUMBER_OF_PUMPS           4
 
-#define PUMP_1                    22
-#define PUMP_2                    17
-#define PUMP_3                    2
-#define PUMP_4                    15
+#define PUMP_1                    21
+#define PUMP_2                    22
+#define PUMP_3                    17
+#define PUMP_4                    2
 
 // Pin connections for built-in hardware
 #define ADC_EN                    14
@@ -25,7 +25,6 @@
 #define ADC_READS                 20    // build average after n reads of ADC
 #define BATTERY_VERY_LOW          3.2
 #define BATTERY_LOW               4.2
-#define BATTERY_HIGH              5.2
 
 #ifndef TFT_DISPOFF
 #define TFT_DISPOFF               0x28

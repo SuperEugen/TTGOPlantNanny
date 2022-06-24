@@ -16,7 +16,7 @@
 //    1 to 4 water pumps:     5v submersable electric water pumps
 //    1 x 4 relais board      to switch the USB power of the pumps
 //    4x AA battery holder:   supply for the electronic and the motors
-//    water tank:             IKEA box, electronics, motors and battery fit into the 3D printed lid
+//    water container:        IKEA box, electronics, motors and battery fit into the 3D printed lid
 //
 //  Libraries used:
 //    TFT_eSPI:               graphic library from Bodmer
@@ -42,11 +42,11 @@
 //    05.09.2019, IH:         buttons integrated
 //    06.09.2019, IH:         deep sleep
 //    08.09.2019, IH:         time drift compensation
-//    23.06.2022, IH:         revisit of project
+//    24.06.2022, IH:         revisit of project, clean up, added showContainerSize
 //
 //***************************************************************************************************
 
-#define VERSION               "0.4"   // 23.06.22
+#define VERSION               "0.4"   // 24.06.22
 
 // libraries
 #include <Preferences.h>
@@ -74,6 +74,7 @@
 const uint8_t layoutButtonWidth = 64;
 const uint8_t layoutInfoBarHeight = 24;
 const uint8_t layoutStatusBarHeight = 15;
+const uint8_t xPosAdjust = 10;  // icons in top bar shifted to the left by this number of pixels
 
 //***************************************************************************************************
 //  Global data
@@ -150,17 +151,17 @@ void setup() {
   clearBottomBtn();
   showProgInfo();
   showSystemNumber();
+  loadPrefs();
   showContainerSize();
 
   // connect and show status
-  loadPrefs();
   esp_wifi_start();
   connectAndShowWifiStatus();
   if(wifiConnected) {
     getNetworkTime();
     showTime();
     connectAndShowMQTTStatus();
-    showAndPublishBatteryLevel();
+    showAndPublishBatteryVoltage();
     showAndPublishWaterLevel();
   
     // configure pins
@@ -168,6 +169,11 @@ void setup() {
     pinMode(PUMP_2, OUTPUT);
     pinMode(PUMP_3, OUTPUT);
     pinMode(PUMP_4, OUTPUT);
+
+    digitalWrite(PUMP_1, HIGH);
+    digitalWrite(PUMP_2, HIGH);
+    digitalWrite(PUMP_3, HIGH);
+    digitalWrite(PUMP_4, HIGH);
 
     // initialise buttons
     buttonsInit();
@@ -344,14 +350,6 @@ void showProgInfo() {
 }
 
 //***************************************************************************************************
-//  showContainerSize
-//  what size of container is used
-//***************************************************************************************************
-void showContainerSize() {
-
-}
-
-//***************************************************************************************************
 //  doTimedJobIfNecessary
 //  update PREF_HOURS_TILL_WATERING for each pump and check is it watering time and is any pump due
 //***************************************************************************************************
@@ -368,7 +366,23 @@ void doTimedJobIfNecessary() {
 //###################################################################################################
     Serial.println("new hour");
     justWatering = true;
-    delay(5000);
+    
+    digitalWrite(PUMP_1, LOW);
+    delay(1000);
+    digitalWrite(PUMP_1, HIGH);
+    delay(1000);
+    digitalWrite(PUMP_2, LOW);
+    delay(1000);
+    digitalWrite(PUMP_2, HIGH);
+    delay(1000);
+    digitalWrite(PUMP_3, LOW);
+    delay(1000);
+    digitalWrite(PUMP_3, HIGH);
+    delay(1000);
+    digitalWrite(PUMP_4, LOW);
+    delay(1000);
+    digitalWrite(PUMP_4, HIGH);
+    
   }  
 }
 
@@ -433,7 +447,7 @@ void getNetworkTime() {
 //  left aligned on info bar at the top
 //***************************************************************************************************
 void showTime() {
-  int xpos = 10;  // left margin
+  int xpos = 8;  // left margin
   int ypos = 8;   // top margin
 
   tft.setTextColor(COLOR_FG_INFO_BAR, COLOR_BG_INFO_BAR);
@@ -452,7 +466,7 @@ void showSystemNumber() {
   const int posFromRight = 5;
   const int radius = 9;
   
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) + radius;
+  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) + radius - xPosAdjust;
   int ypos = layoutInfoBarHeight / 2;
 
   tft.fillCircle(xpos, ypos, radius, COLOR_CIRCLE);
@@ -471,7 +485,7 @@ void connectAndShowWifiStatus() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 4;
 
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight);
+  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
   int ypos = (layoutInfoBarHeight - iconHeight) / 2;
 
   int wifiRetries = 0;
@@ -505,7 +519,7 @@ void connectAndShowMQTTStatus() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 3;
 
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight);
+  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
   int ypos = (layoutInfoBarHeight - iconHeight) / 2;
 
   uint16_t color;
@@ -527,6 +541,102 @@ void connectAndShowMQTTStatus() {
 }
 
 //***************************************************************************************************
+//  showAndPublishBatteryVoltage
+//  
+//***************************************************************************************************
+void showAndPublishBatteryVoltage() {
+  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
+  const int posFromRight = 2;
+
+  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
+  int ypos = (layoutInfoBarHeight - iconHeight) / 2;
+
+  uint16_t color;
+
+  esp_adc_cal_characteristics_t adc_chars;
+  esp_adc_cal_value_t val_type = esp_adc_cal_characterize((adc_unit_t)ADC_UNIT_1, 
+                                                          (adc_atten_t)ADC1_CHANNEL_6, 
+                                                          (adc_bits_width_t)ADC_WIDTH_BIT_12, 
+                                                          ADC_VREF, 
+                                                          &adc_chars);
+
+  uint16_t v = analogRead(ADC_PIN);
+  float batteryVoltage = ((float)v / 4095.0) * 2.0 * 3.3 * (ADC_VREF / 1100.0);
+
+  String voltage = "Bat.: " + String(batteryVoltage) + "V";
+  Serial.println(voltage);
+
+  if(batteryVoltage < BATTERY_VERY_LOW) {
+    color = TFT_RED;
+  } else if(batteryVoltage < BATTERY_LOW) {
+    color = TFT_YELLOW;
+  } else {
+    color = TFT_GREEN;
+  }
+  
+  tft.drawXBitmap(xpos, ypos, iconBattery, iconWidth, iconHeight, color, COLOR_BG_INFO_BAR);
+
+  mqttPublishValue(mqttTopicBatVoltage, String(batteryVoltage));
+}
+
+//***************************************************************************************************
+//  showAndPublishWaterLevel
+//  
+//***************************************************************************************************
+void showAndPublishWaterLevel() {
+  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
+  const int posFromRight = 1;
+
+  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
+  int ypos = (layoutInfoBarHeight - iconHeight) / 2;
+
+  uint16_t color;
+
+  int percent;
+
+  percent = containerSize / remainingWater * 100;
+  if(percent < 10) {
+    color = TFT_RED;
+  } else if(percent < 30) {
+    color = TFT_YELLOW;
+  } else {
+    color = TFT_GREEN;
+  }
+  Serial.print("Container = ");
+  Serial.print(percent);
+  Serial.println("%");
+  tft.drawXBitmap(xpos, ypos, iconContainer, iconWidth, iconHeight, color, COLOR_BG_INFO_BAR);
+}
+
+//***************************************************************************************************
+//  showContainerSize
+//  
+//***************************************************************************************************
+void showContainerSize() {
+  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
+  const int posFromRight = 0;
+
+  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
+  int ypos = ((layoutInfoBarHeight - iconHeight) / 2) + 8;
+
+  String containerChar;
+
+  if(containerSize == CONTAINER_SIZE_SMALL){
+    containerChar = "S";
+  } else if (containerSize == CONTAINER_SIZE_TALL){
+    containerChar ="T";
+  } else if (containerSize == CONTAINER_SIZE_FLAT){
+    containerChar ="F";
+  } else {
+    containerChar ="B";
+  }
+  
+  tft.setTextColor(COLOR_FG_INFO_BAR, COLOR_BG_INFO_BAR);
+  tft.setTextFont(0);
+  tft.drawString(containerChar, xpos, ypos, FONT2);  
+}
+
+//***************************************************************************************************
 //  mqttSubscribeToTopics
 //  to avoid feedback loops we subscribe to command messages and send status messages
 //***************************************************************************************************
@@ -534,6 +644,8 @@ void mqttSubscribeToTopics() {
   String baseCommand;
   String pumpCommand;
   String temp;
+  String temp1;
+  String temp2;
 
   baseCommand.concat(mqttMainTopic);
   baseCommand.concat("/");
@@ -547,8 +659,12 @@ void mqttSubscribeToTopics() {
     temp = pumpCommand;
     temp.concat(char(48 + i));    // 48 = ASCII '0'
     temp.concat("/");
-    temp.concat(mqttCommandFreq);
-    mqttClient.subscribe(temp.c_str());
+    temp1 =temp;
+    temp1.concat(mqttCommandFreq);
+    mqttClient.subscribe(temp1.c_str());
+    temp2 = temp;
+    temp2.concat(mqttCommandAmount);
+    mqttClient.subscribe(temp2.c_str());
   }
 }
 
@@ -593,6 +709,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         Serial.print("MQTT pump ");
         Serial.print(pump);
         Serial.println(": new watering frequency received");
+//###################################################################################################
+// todo
+// update pump specific pref
+//###################################################################################################
+
+      } else if(shortenedPumpTopic == mqttCommandAmount){
+        Serial.print("MQTT pump ");
+        Serial.print(pump);
+        Serial.println(": new watering amount received");
 //###################################################################################################
 // todo
 // update pump specific pref
@@ -653,74 +778,6 @@ void mqttPublishValue(String topic, String value) {
   Serial.print(completeTopic.c_str());
   Serial.print(" = ");
   Serial.println(value.c_str());
-}
-
-//***************************************************************************************************
-//  showAndPublishBatteryLevel
-//  
-//***************************************************************************************************
-void showAndPublishBatteryLevel() {
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
-  const int posFromRight = 2;
-
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight);
-  int ypos = (layoutInfoBarHeight - iconHeight) / 2;
-
-  uint16_t color;
-
-  esp_adc_cal_characteristics_t adc_chars;
-  esp_adc_cal_value_t val_type = esp_adc_cal_characterize((adc_unit_t)ADC_UNIT_1, 
-                                                          (adc_atten_t)ADC1_CHANNEL_6, 
-                                                          (adc_bits_width_t)ADC_WIDTH_BIT_12, 
-                                                          ADC_VREF, 
-                                                          &adc_chars);
-
-  uint16_t v = analogRead(ADC_PIN);
-  float batteryVoltage = ((float)v / 4095.0) * 2.0 * 3.3 * (ADC_VREF / 1100.0);
-
-  String voltage = "Bat.: " + String(batteryVoltage) + "V";
-  Serial.println(voltage);
-
-  if(batteryVoltage < BATTERY_VERY_LOW) {
-    color = TFT_RED;
-  } else if(batteryVoltage < BATTERY_LOW) {
-    color = TFT_YELLOW;
-  } else {
-    color = TFT_GREEN;
-  }
-  
-  tft.drawXBitmap(xpos, ypos, iconBattery, iconWidth, iconHeight, color, COLOR_BG_INFO_BAR);
-
-  mqttPublishValue(mqttTopicBatVoltage, String(batteryVoltage));
-}
-
-//***************************************************************************************************
-//  showAndPublishWaterLevel
-//  
-//***************************************************************************************************
-void showAndPublishWaterLevel() {
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
-  const int posFromRight = 1;
-
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight);
-  int ypos = (layoutInfoBarHeight - iconHeight) / 2;
-
-  uint16_t color;
-
-  int percent;
-
-  percent = containerSize / remainingWater * 100;
-  if(percent < 10) {
-    color = TFT_RED;
-  } else if(percent < 30) {
-    color = TFT_YELLOW;
-  } else {
-    color = TFT_GREEN;
-  }
-  Serial.print("Container = ");
-  Serial.print(percent);
-  Serial.println("%");
-  tft.drawXBitmap(xpos, ypos, iconContainer, iconWidth, iconHeight, color, COLOR_BG_INFO_BAR);
 }
 
 //***************************************************************************************************
