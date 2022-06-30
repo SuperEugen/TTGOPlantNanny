@@ -43,10 +43,12 @@
 //    06.09.2019, IH:         deep sleep
 //    08.09.2019, IH:         time drift compensation
 //    24.06.2022, IH:         revisit of project, clean up, added showContainerSize
+//    28.06.2022, IH:         more power supply testing
+//    30.06.2022, IH:         some code reformatting
 //
 //***************************************************************************************************
 
-#define VERSION               "0.4"   // 24.06.22
+#define VERSION               "0.6"   // 30.06.22
 
 // libraries
 #include <Preferences.h>
@@ -95,8 +97,6 @@ bool btnBClicked = false;
 
 unsigned long timeStamp;
 
-bool justWatering = false;
-
 //***************************************************************************************************
 //  Data stored in preferences
 //***************************************************************************************************
@@ -120,19 +120,14 @@ uint16_t secondsOfWatering[NUMBER_OF_PUMPS];
 //***************************************************************************************************
 //  Screens
 //***************************************************************************************************
-//###################################################################################################
-// todo
-// name all screens, struct for follow up screen for top and bottom buttons, button icons and texts
-//###################################################################################################
-const int scrWatering =   0;
 const int scrMain =       1;
 
 int currentScreen;
 
-//***************************************************************************************************
-//  SETUP
-//***************************************************************************************************
 void setup() {
+//***************************************************************************************************
+//  run once every wake up from deep sleep
+//***************************************************************************************************
   Serial.begin(115200);
   Serial.println();
   Serial.print("Starting plant-nanny by Ingo Hoffmann. Version: ");
@@ -170,6 +165,7 @@ void setup() {
     pinMode(PUMP_3, OUTPUT);
     pinMode(PUMP_4, OUTPUT);
 
+    // immediately turn relais off
     digitalWrite(PUMP_1, HIGH);
     digitalWrite(PUMP_2, HIGH);
     digitalWrite(PUMP_3, HIGH);
@@ -180,6 +176,7 @@ void setup() {
 
     // prepare ui
     currentScreen = scrMain;
+    showScreen();
     timeStamp = millis();
   } else {
     Serial.print("No WiFi -> ");
@@ -187,10 +184,12 @@ void setup() {
   }
 }
 
+void loop() {
 //***************************************************************************************************
 //  LOOP
 //***************************************************************************************************
-void loop() {
+  int lastScreen = 0;
+  
   if(minuteChanged() && wifiConnected) {
     showTime();
   }
@@ -200,35 +199,29 @@ void loop() {
   }
   mqttClient.loop();
 
-  doTimedJobIfNecessary();
+  doTimedJobIfNecessary();  // and go to sleep after job is done
 
-  if(justWatering) {
-    Serial.print("just watering -> ");
-    currentScreen = scrWatering;
-    showScreen();
-    setTimerAndGoToSleep();    
-  } else {
-    btnT.loop();
-    btnB.loop();
-    if(btnTClicked || btnBClicked) {
-      timeStamp = millis();
-    }
+  btnT.loop();
+  btnB.loop();
+  if(btnTClicked) {
+    timeStamp = millis();
+    showBtnTClicked();
+  }
+  if(btnBClicked) {
+    timeStamp = millis();
+    showBtnBClicked();
+  }
 
-    updateUI();
-    showScreen();
-
-    if((millis() - timeStamp) > (INACTIVITY_THRESHOLD * 1000)) {
-      Serial.print("No activity -> ");
-      setTimerAndGoToSleep();
-    }
+  if((millis() - timeStamp) > (INACTIVITY_THRESHOLD * 1000)) {
+    Serial.print("No activity -> ");
+    setTimerAndGoToSleep();
   }
 }
 
+void loadPrefs() {
 //***************************************************************************************************
-//  loadPrefs
 //  name space is "nanny", these name value pairs store data during deep sleep
 //***************************************************************************************************
-void loadPrefs() {
   prefs.begin("nanny", false);
   wateringHour = prefs.getUInt(PREF_WATERING_HOUR, DEFAULT_WATERING_HOUR);
   Serial.print("Load from prefs: wateringHour = ");
@@ -268,66 +261,60 @@ void loadPrefs() {
   prefs.end();
 }
 
+void clearInfoBar() {
 //***************************************************************************************************
-//  clearInfoBar
 //  time, nanny number, wifi, mqtt, water, battery
 //***************************************************************************************************
-void clearInfoBar() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   tft.fillRect(0, 0, 
                TFT_HEIGHT - layoutButtonWidth,  layoutInfoBarHeight, 
                COLOR_BG_INFO_BAR);
 }
 
+void clearMainArea() {
 //***************************************************************************************************
-//  clearMainArea
 //  available for any information
 //***************************************************************************************************
-void clearMainArea() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   tft.fillRect(0, layoutInfoBarHeight, 
                TFT_HEIGHT - layoutButtonWidth, TFT_WIDTH - layoutInfoBarHeight - layoutStatusBarHeight, 
                COLOR_BG_MAIN_AREA);
 }
 
-//***************************************************************************************************
-//  clearStatusBar
-//  page indicator
-//***************************************************************************************************
 void clearStatusBar() {
+//***************************************************************************************************
+//  
+//***************************************************************************************************
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   tft.fillRect(0, TFT_WIDTH - layoutStatusBarHeight, 
                TFT_HEIGHT - layoutButtonWidth,  layoutStatusBarHeight, 
                COLOR_BG_STATUS_BAR);
 }
 
+void clearTopBtn() {
 //***************************************************************************************************
-//  clearTopBtn
 //  icon and text
 //***************************************************************************************************
-void clearTopBtn() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   tft.fillRect(TFT_HEIGHT - layoutButtonWidth, 0,
                layoutButtonWidth, TFT_WIDTH / 2, 
                COLOR_BG_TOP_BTN);
 }
 
+void clearBottomBtn() {
 //***************************************************************************************************
-//  clearBottomBtn
 //  icon and text
 //***************************************************************************************************
-void clearBottomBtn() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   tft.fillRect(TFT_HEIGHT - layoutButtonWidth, TFT_WIDTH / 2,
                layoutButtonWidth, TFT_WIDTH - (TFT_WIDTH / 2), 
                COLOR_BG_BOTTOM_BTN);
 }
 
+void showProgInfo() {
 //***************************************************************************************************
-//  showProgInfo
 //  program name, developer and version during start-up
 //***************************************************************************************************
-void showProgInfo() {
   int xpos = 10;  // left margin
   int ypos = 40;  // top margin
   char temp[30];  // for string concatination
@@ -349,104 +336,93 @@ void showProgInfo() {
   tft.drawString(temp, xpos, ypos, GFXFF);
 }
 
+void doTimedJobIfNecessary() {
 //***************************************************************************************************
-//  doTimedJobIfNecessary
 //  update PREF_HOURS_TILL_WATERING for each pump and check is it watering time and is any pump due
 //***************************************************************************************************
-void doTimedJobIfNecessary() {
-//###################################################################################################
-// todo
-// checke for watering time and watering time + 12
-//###################################################################################################
-  const int timerWindow = 30;
+  const int timerWindow = 30;   // to adjust for inaccuracies of timer
 
+  // is it full hour?
   if((minute() == 0) && (second() < timerWindow)) {
-//###################################################################################################
-// todo
-//###################################################################################################
     Serial.println("new hour");
-    justWatering = true;
-    
+    // recaclulate hoursTillWatering for every pump
+
+    // check all pumps if watering is due
+
+    Serial.print("just watering -> ");
+
     digitalWrite(PUMP_1, LOW);
     delay(1000);
     digitalWrite(PUMP_1, HIGH);
     delay(1000);
     digitalWrite(PUMP_2, LOW);
-    delay(1000);
+    delay(2000);
     digitalWrite(PUMP_2, HIGH);
     delay(1000);
     digitalWrite(PUMP_3, LOW);
-    delay(1000);
+    delay(3000);
     digitalWrite(PUMP_3, HIGH);
     delay(1000);
     digitalWrite(PUMP_4, LOW);
-    delay(1000);
+    delay(4000);
     digitalWrite(PUMP_4, HIGH);
-    
+
+    setTimerAndGoToSleep();    
   }  
 }
 
+void showScreen() {
 //***************************************************************************************************
-//  updateUI
-//  calculate what screen and buttons to show according to the buttons pressed, if any
-//***************************************************************************************************
-void updateUI() {
-//###################################################################################################
-// todo
-// use struct
-//###################################################################################################
-
-  btnTClicked = false;
-  btnBClicked = false;
-}
-
-//***************************************************************************************************
-//  showScreen
 //  show graphics and texts for each screen
 //***************************************************************************************************
-void showScreen() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   int xpos = 10;  // left margin
   int ypos = (TFT_WIDTH - layoutInfoBarHeight - layoutStatusBarHeight) / 2 ;  // top margin
+  char temp[30];  // for string concatination
 
   clearMainArea();
-
   tft.setTextColor(COLOR_FG_MAIN_AREA, COLOR_BG_MAIN_AREA);
   tft.setTextDatum(TL_DATUM);
   tft.setFreeFont(FSS12);
   switch(currentScreen) {
-    case scrWatering:
-      tft.drawString(TEXT_WATERING, xpos, ypos, GFXFF);
     case scrMain:
-      ;
-    default:
-      ;
+      tft.setTextColor(COLOR_FG_MAIN_AREA, COLOR_BG_MAIN_AREA);
+      tft.setTextDatum(TL_DATUM);
+      tft.setFreeFont(FSS12);
+      tft.drawString("Main Screen", xpos, ypos, GFXFF);
   }
-//###################################################################################################
-// todo
-// what to do when data entry?
-//###################################################################################################
-
-//  pageIndicator(1, 4);
-  
 }
 
+void showBtnTClicked() {
 //***************************************************************************************************
-//  getNetworkTime
+//  
+//***************************************************************************************************
+  
+  btnTClicked = false;
+}
+
+void showBtnBClicked() {
+//***************************************************************************************************
+//  
+//***************************************************************************************************
+  
+  btnBClicked = false;
+}
+
+void getNetworkTime() {
+//***************************************************************************************************
 //  get network time according to time zone, needs wifi connection
 //***************************************************************************************************
-void getNetworkTime() {
   waitForSync();                    // Wait for ezTime to get its time synchronized
   myTZ.setLocation(F(timezone));
   setInterval(uint16_t(86400));      // 86400 = 60 * 60 * 24, set NTP polling interval to daily
   setDebug(NONE);                   // NONE = set ezTime to quiet
 }
 
+void showTime() {
 //***************************************************************************************************
-//  showTime
 //  left aligned on info bar at the top
 //***************************************************************************************************
-void showTime() {
   int xpos = 8;  // left margin
   int ypos = 8;   // top margin
 
@@ -457,11 +433,10 @@ void showTime() {
   tft.drawString(String(myTZ.dateTime("H:i")), xpos, ypos, GFXFF);  
 }
 
+void showSystemNumber() {
 //***************************************************************************************************
-//  showSystemNumber
 //  taken from settings, to distinguish more than one plant nanny, used in mqtt messages
 //***************************************************************************************************
-void showSystemNumber() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 5;
   const int radius = 9;
@@ -477,11 +452,10 @@ void showSystemNumber() {
   tft.drawString(String(NANNY_NUMBER), xpos, ypos, GFXFF);  
 }
 
+void connectAndShowWifiStatus() {
 //***************************************************************************************************
-//  connectAndShowWifiStatus
 //  stacked to the right on info bar at the top
 //***************************************************************************************************
-void connectAndShowWifiStatus() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 4;
 
@@ -511,11 +485,10 @@ void connectAndShowWifiStatus() {
   tft.drawXBitmap(xpos, ypos, iconWifi, iconWidth, iconHeight, color, COLOR_BG_INFO_BAR);    
 }
 
+void connectAndShowMQTTStatus() {
 //***************************************************************************************************
-//  connectAndShowMQTTStatus
 //  stacked to the right on info bar at the top
 //***************************************************************************************************
-void connectAndShowMQTTStatus() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 3;
 
@@ -540,11 +513,10 @@ void connectAndShowMQTTStatus() {
   tft.drawXBitmap(xpos, ypos, iconMQTT, iconWidth, iconHeight, color, COLOR_BG_INFO_BAR);
 }
 
+void showAndPublishBatteryVoltage() {
 //***************************************************************************************************
-//  showAndPublishBatteryVoltage
 //  
 //***************************************************************************************************
-void showAndPublishBatteryVoltage() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 2;
 
@@ -579,11 +551,10 @@ void showAndPublishBatteryVoltage() {
   mqttPublishValue(mqttTopicBatVoltage, String(batteryVoltage));
 }
 
+void showAndPublishWaterLevel() {
 //***************************************************************************************************
-//  showAndPublishWaterLevel
 //  
 //***************************************************************************************************
-void showAndPublishWaterLevel() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 1;
 
@@ -608,11 +579,10 @@ void showAndPublishWaterLevel() {
   tft.drawXBitmap(xpos, ypos, iconContainer, iconWidth, iconHeight, color, COLOR_BG_INFO_BAR);
 }
 
+void showContainerSize() {
 //***************************************************************************************************
-//  showContainerSize
 //  
 //***************************************************************************************************
-void showContainerSize() {
   // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 0;
 
@@ -636,11 +606,10 @@ void showContainerSize() {
   tft.drawString(containerChar, xpos, ypos, FONT2);  
 }
 
+void mqttSubscribeToTopics() {
 //***************************************************************************************************
-//  mqttSubscribeToTopics
 //  to avoid feedback loops we subscribe to command messages and send status messages
 //***************************************************************************************************
-void mqttSubscribeToTopics() {
   String baseCommand;
   String pumpCommand;
   String temp;
@@ -668,11 +637,10 @@ void mqttSubscribeToTopics() {
   }
 }
 
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
 //***************************************************************************************************
-//  mqttCallback
 //  there are general and pump specific commands
 //***************************************************************************************************
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String topicPrefix;
   int topicPrefixLength;
   String topicString;
@@ -733,11 +701,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   }
 }
 
+void mqttReconnect() {
 //***************************************************************************************************
-//  mqttReconnect
 //  
 //***************************************************************************************************
-void mqttReconnect() {
   int mqttRetries = 0;
 
   // try 5 times to reconnect
@@ -757,11 +724,10 @@ void mqttReconnect() {
   }
 }
 
+void mqttPublishValue(String topic, String value) {
 //***************************************************************************************************
-//  mqttPublishValue
 //  
 //***************************************************************************************************
-void mqttPublishValue(String topic, String value) {
   String completeTopic;
 
   if(!mqttClient.connected()) {
@@ -780,11 +746,10 @@ void mqttPublishValue(String topic, String value) {
   Serial.println(value.c_str());
 }
 
+void buttonsInit() {
 //***************************************************************************************************
-//  buttonsInit
 //  
 //***************************************************************************************************
-void buttonsInit() {
   btnT.setPressedHandler([](Button2 & b) {
     Serial.println("Top button clicked");
     btnTClicked = true;
@@ -796,11 +761,10 @@ void buttonsInit() {
   });  
 }
 
+void setTimerAndGoToSleep() {
 //***************************************************************************************************
-//  setTimerAndGoToSleep
 //  set alarm clock to the next full hour (if no internet connection exists then just 1 hour)
 //***************************************************************************************************
-void setTimerAndGoToSleep() {
   const unsigned long uSToSecondsFactor = 1000000;
   unsigned long sleepingSeconds = 60 * 60;          // one hour
 
@@ -816,28 +780,9 @@ void setTimerAndGoToSleep() {
   tft.writecommand(TFT_DISPOFF);
   tft.writecommand(TFT_SLPIN);
   int err = esp_wifi_stop();
+  // wakeup on timer
   esp_sleep_enable_timer_wakeup((sleepingSeconds + TIMER_DRIFT_COMPENSATION) * uSToSecondsFactor);
+  // also wakeup on top button
   esp_sleep_enable_ext1_wakeup(GPIO_SEL_35, ESP_EXT1_WAKEUP_ALL_LOW);
   esp_deep_sleep_start();
-}
-
-//***************************************************************************************************
-//  pageIndicator
-//  small dots on status bar indicating current page; 9 pages is maximum
-//***************************************************************************************************
-void pageIndicator(uint8_t current, uint8_t pages) {
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
-  const int radius = 5;
-  const int xSeparation = 20;
-
-  int xpos = (TFT_HEIGHT - layoutButtonWidth) / 2 - ((pages - 1) * xSeparation) / 2;
-  int ypos = TFT_WIDTH - (layoutStatusBarHeight / 2);
-
-  for(int i = 0; i < pages; i++) {
-    if(i == (current - 1)) {
-      tft.fillCircle(xpos + (i * xSeparation), ypos, radius, COLOR_FG_STATUS_BAR);
-    } else {
-      tft.drawCircle(xpos + (i * xSeparation), ypos, radius, COLOR_FG_STATUS_BAR);
-    }
-  }
 }

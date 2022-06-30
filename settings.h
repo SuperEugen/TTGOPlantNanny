@@ -23,8 +23,8 @@
 
 // Battery measurement
 #define ADC_READS                 20    // build average after n reads of ADC
-#define BATTERY_VERY_LOW          3.2
-#define BATTERY_LOW               4.2
+#define BATTERY_VERY_LOW          3.0
+#define BATTERY_LOW               3.5
 
 #ifndef TFT_DISPOFF
 #define TFT_DISPOFF               0x28
@@ -57,7 +57,7 @@ const char* timezone =            "Europe/Berlin";
 #define CONTAINER_SIZE_BIG        10600
 
 // water pump througput in milli liter / second
-#define PUMP_BLACK                10
+#define PUMP_BLACK                69  // i.e. 250l/h
 
 // watering frequencies
 #define WATERING_FREQ_OFF         0
