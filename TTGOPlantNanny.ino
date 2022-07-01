@@ -45,10 +45,11 @@
 //    24.06.2022, IH:         revisit of project, clean up, added showContainerSize
 //    28.06.2022, IH:         more power supply testing
 //    30.06.2022, IH:         some code reformatting
+//    01.07.2022, IH:         button clicked visualisation, version number shown in status bar
 //
 //***************************************************************************************************
 
-#define VERSION               "0.6"   // 30.06.22
+#define VERSION               "0.7"   // 01.07.22
 
 // libraries
 #include <Preferences.h>
@@ -265,7 +266,6 @@ void clearInfoBar() {
 //***************************************************************************************************
 //  time, nanny number, wifi, mqtt, water, battery
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   tft.fillRect(0, 0, 
                TFT_HEIGHT - layoutButtonWidth,  layoutInfoBarHeight, 
                COLOR_BG_INFO_BAR);
@@ -275,7 +275,6 @@ void clearMainArea() {
 //***************************************************************************************************
 //  available for any information
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   tft.fillRect(0, layoutInfoBarHeight, 
                TFT_HEIGHT - layoutButtonWidth, TFT_WIDTH - layoutInfoBarHeight - layoutStatusBarHeight, 
                COLOR_BG_MAIN_AREA);
@@ -285,7 +284,6 @@ void clearStatusBar() {
 //***************************************************************************************************
 //  
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   tft.fillRect(0, TFT_WIDTH - layoutStatusBarHeight, 
                TFT_HEIGHT - layoutButtonWidth,  layoutStatusBarHeight, 
                COLOR_BG_STATUS_BAR);
@@ -295,7 +293,6 @@ void clearTopBtn() {
 //***************************************************************************************************
 //  icon and text
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   tft.fillRect(TFT_HEIGHT - layoutButtonWidth, 0,
                layoutButtonWidth, TFT_WIDTH / 2, 
                COLOR_BG_TOP_BTN);
@@ -305,7 +302,6 @@ void clearBottomBtn() {
 //***************************************************************************************************
 //  icon and text
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   tft.fillRect(TFT_HEIGHT - layoutButtonWidth, TFT_WIDTH / 2,
                layoutButtonWidth, TFT_WIDTH - (TFT_WIDTH / 2), 
                COLOR_BG_BOTTOM_BTN);
@@ -329,10 +325,15 @@ void showProgInfo() {
   strcpy(temp, TEXT_BY);
   strcat(temp, " Ingo Hoffmann");
   tft.drawString(temp, xpos, ypos, GFXFF);
-  ypos += tft.fontHeight(GFXFF);
+  
+  tft.setTextColor(COLOR_FG_STATUS_BAR, COLOR_BG_STATUS_BAR);
+  tft.setTextDatum(TL_DATUM);
+  xpos = 8;
+  ypos = TFT_WIDTH - layoutStatusBarHeight + 4;
   strcpy(temp, TEXT_VERSION);
   strcat(temp, " ");
   strcat(temp, VERSION);
+  tft.setTextFont(0);
   tft.drawString(temp, xpos, ypos, GFXFF);
 }
 
@@ -375,7 +376,6 @@ void showScreen() {
 //***************************************************************************************************
 //  show graphics and texts for each screen
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   int xpos = 10;  // left margin
   int ypos = (TFT_WIDTH - layoutInfoBarHeight - layoutStatusBarHeight) / 2 ;  // top margin
   char temp[30];  // for string concatination
@@ -397,7 +397,14 @@ void showBtnTClicked() {
 //***************************************************************************************************
 //  
 //***************************************************************************************************
-  
+  tft.fillRect(TFT_HEIGHT - layoutButtonWidth, 0,
+               layoutButtonWidth, TFT_WIDTH / 2, 
+               COLOR_BG_TOP_BTN_PRESS);
+  delay(200);
+  tft.fillRect(TFT_HEIGHT - layoutButtonWidth, 0,
+               layoutButtonWidth, TFT_WIDTH / 2, 
+               COLOR_BG_TOP_BTN);
+
   btnTClicked = false;
 }
 
@@ -405,6 +412,13 @@ void showBtnBClicked() {
 //***************************************************************************************************
 //  
 //***************************************************************************************************
+  tft.fillRect(TFT_HEIGHT - layoutButtonWidth, TFT_WIDTH / 2,
+               layoutButtonWidth, TFT_WIDTH - (TFT_WIDTH / 2), 
+               COLOR_BG_BOTTOM_BTN_PRESS);
+  delay(200);
+  tft.fillRect(TFT_HEIGHT - layoutButtonWidth, TFT_WIDTH / 2,
+               layoutButtonWidth, TFT_WIDTH - (TFT_WIDTH / 2), 
+               COLOR_BG_BOTTOM_BTN);
   
   btnBClicked = false;
 }
@@ -437,7 +451,6 @@ void showSystemNumber() {
 //***************************************************************************************************
 //  taken from settings, to distinguish more than one plant nanny, used in mqtt messages
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 5;
   const int radius = 9;
   
@@ -456,7 +469,6 @@ void connectAndShowWifiStatus() {
 //***************************************************************************************************
 //  stacked to the right on info bar at the top
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 4;
 
   int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
@@ -489,7 +501,6 @@ void connectAndShowMQTTStatus() {
 //***************************************************************************************************
 //  stacked to the right on info bar at the top
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 3;
 
   int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
@@ -517,7 +528,6 @@ void showAndPublishBatteryVoltage() {
 //***************************************************************************************************
 //  
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 2;
 
   int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
@@ -555,7 +565,6 @@ void showAndPublishWaterLevel() {
 //***************************************************************************************************
 //  
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 1;
 
   int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
@@ -583,7 +592,6 @@ void showContainerSize() {
 //***************************************************************************************************
 //  
 //***************************************************************************************************
-  // swap TFT_WIDTH and TFT_HEIGHT for landscape use
   const int posFromRight = 0;
 
   int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;

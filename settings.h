@@ -98,19 +98,22 @@ const char* mqttCommandHour =     "command-hour";         // sets watering-hour
 const char* mqttCommandFreq =     "command-freq";         // per pump command, sets watering-frequency
 const char* mqttCommandAmount =   "command-amount";       // per pump command, sets watering-amount
 
+// all color values are 16bit i.e. RGB565
 // background colors
-#define COLOR_BG_INFO_BAR         0x03E0                    //   0, 128,   0
-#define COLOR_BG_STATUS_BAR       0x03E0                    //   0, 128,   0
-#define COLOR_BG_TOP_BTN          0x7BE0                    // 128, 128,   0
-#define COLOR_BG_BOTTOM_BTN       0x7800                    // 128,   0,   0
-#define COLOR_BG_MAIN_AREA        0x07E0                    //   0, 255,   0
+#define COLOR_BG_INFO_BAR         0x03E0                    // RGB =   0, 127,   0
+#define COLOR_BG_STATUS_BAR       0x03E0                    // RGB =   0, 127,   0
+#define COLOR_BG_TOP_BTN          0x7BE0                    // RGB = 127, 127,   0
+#define COLOR_BG_BOTTOM_BTN       0x7800                    // RGB = 127,   0,   0
+#define COLOR_BG_TOP_BTN_PRESS    0x5AE4                    // RGB =  95,  95,  32
+#define COLOR_BG_BOTTOM_BTN_PRESS 0x5904                    // RGB =  95,  32,  32
+#define COLOR_BG_MAIN_AREA        0x07E0                    // RGB =   0, 255,   0
 
 // foreground colors
-#define COLOR_FG_INFO_BAR         0xFFFF                    // 255, 255, 255
-#define COLOR_FG_STATUS_BAR       0xFFFF                    // 255, 255, 255
-#define COLOR_FG_TOP_BTN          0xB7E0                    // 180, 255,   0
-#define COLOR_FG_BOTTOM_BTN       0xB7E0                    // 180, 255,   0
-#define COLOR_FG_MAIN_AREA        0x0000                    //   0,   0,   0
+#define COLOR_FG_INFO_BAR         0xFFFF                    // RGB = 255, 255, 255
+#define COLOR_FG_STATUS_BAR       0xFFFF                    // RGB = 255, 255, 255
+#define COLOR_FG_TOP_BTN          0xB7E0                    // RGB = 180, 255,   0
+#define COLOR_FG_BOTTOM_BTN       0xB7E0                    // RGB = 180, 255,   0
+#define COLOR_FG_MAIN_AREA        0x0000                    // RGB =   0,   0,   0
 
 // circle for system number
-#define COLOR_CIRCLE              0x000F                    //   0,   0, 128
+#define COLOR_CIRCLE              0x000F                    // RGB =   0,   0, 127
