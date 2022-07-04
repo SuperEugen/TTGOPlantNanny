@@ -19,12 +19,13 @@
 //    water container:        IKEA box, electronics, motors and battery fit into the 3D printed lid
 //
 //  Libraries used:
+//    Preferences:            ESP32 lib for storing values permanently in non-volstile ram
 //    TFT_eSPI:               graphic library from Bodmer
 //    Free_Fonts:             
 //    Button2:                lib for the built-in buttons from LennartHennigs
 //    esp_adc_cal:            lib for battery level measurement
+//    esp_wifi:               lib to set wifi into deep sleep
 //    WiFi:                   connect to wireless network
-//    FS:                     SPIFFS
 //    PubSubClient:           MQTT
 //    ezTime:                 time
 //
@@ -46,10 +47,11 @@
 //    28.06.2022, IH:         more power supply testing
 //    30.06.2022, IH:         some code reformatting
 //    01.07.2022, IH:         button clicked visualisation, version number shown in status bar
+//    04.07.2022, IH:         problems with pref storage
 //
 //***************************************************************************************************
 
-#define VERSION               "0.7"   // 01.07.22
+#define VERSION               "0.8"   // 04.07.22
 
 // libraries
 #include <Preferences.h>
@@ -64,20 +66,9 @@
 
 // project files
 #include "icons.h"
-#include "secrets.h"
+#include "secrets.h"          // secrets-dummy.h is NOT used
 #include "settings.h"
 #include "texts.h"
-
-// defines
-#define FS_NO_GLOBALS
-
-//***************************************************************************************************
-//  Global consts
-//***************************************************************************************************
-const uint8_t layoutButtonWidth = 64;
-const uint8_t layoutInfoBarHeight = 24;
-const uint8_t layoutStatusBarHeight = 15;
-const uint8_t xPosAdjust = 10;  // icons in top bar shifted to the left by this number of pixels
 
 //***************************************************************************************************
 //  Global data
@@ -105,18 +96,9 @@ uint8_t wateringHour;
 uint16_t containerSize;
 uint16_t remainingWater;
 uint16_t pumpThroughput;
-uint16_t hoursBetweenWaterings[NUMBER_OF_PUMPS];
-uint16_t hoursTillWatering[NUMBER_OF_PUMPS];
-uint16_t secondsOfWatering[NUMBER_OF_PUMPS];
-
-// preferences must be 15 characters at max
-#define PREF_WATERING_HOUR            "wh"
-#define PREF_CONTAINER_SIZE           "cs"
-#define PREF_REMAINING_WATER          "rw"
-#define PREF_PUMP_THROUGHPUT          "pt"
-#define PREF_HOURS_BETWEEN_WATERINGS  "hb"
-#define PREF_HOURS_TILL_WATERING      "ht"
-#define PREF_SEC_WATERING_AMOUNT      "wa"
+uint16_t wateringFreq[NUMBER_OF_PUMPS];
+uint16_t nextWatering[NUMBER_OF_PUMPS];
+uint16_t wateringAmount[NUMBER_OF_PUMPS];
 
 //***************************************************************************************************
 //  Screens
@@ -225,40 +207,57 @@ void loadPrefs() {
 //***************************************************************************************************
   prefs.begin("nanny", false);
   wateringHour = prefs.getUInt(PREF_WATERING_HOUR, DEFAULT_WATERING_HOUR);
-  Serial.print("Load from prefs: wateringHour = ");
+  Serial.print("Load from prefs: wateringHour       = ");
   Serial.println(String(wateringHour));
   containerSize = prefs.getUInt(PREF_CONTAINER_SIZE, CONTAINER_SIZE_SMALL);
-  Serial.print("Load from prefs: containerSize = ");
+  Serial.print("Load from prefs: containerSize      = ");
   Serial.println(String(containerSize));
   remainingWater = prefs.getUInt(PREF_REMAINING_WATER, CONTAINER_SIZE_SMALL);
-  Serial.print("Load from prefs: remainingWater = ");
+  Serial.print("Load from prefs: remainingWater     = ");
   Serial.println(String(remainingWater));
   pumpThroughput = prefs.getUInt(PREF_PUMP_THROUGHPUT, PUMP_BLACK);
-  Serial.print("Load from prefs: pumpThroughput = ");
+  Serial.print("Load from prefs: pumpThroughput     = ");
   Serial.println(String(pumpThroughput));
-  for(int i = 0; i < NUMBER_OF_PUMPS; i++) {
-    // 49 = ASCII '1'
-    hoursBetweenWaterings[i] = prefs.getUInt(PREF_HOURS_BETWEEN_WATERINGS + char(49 + i), 
-                                             DEFAULT_WATERING_FREQ);
-    Serial.print("Load from prefs: hoursBetweenWaterings[");
-    Serial.print(String(i));
-    Serial.print("] = ");
-    Serial.print(String(hoursBetweenWaterings[i]));
-    // 49 = ASCII '1'
-    hoursTillWatering[i] = prefs.getUInt(PREF_HOURS_TILL_WATERING + char(49 + i), 
-                                         DEFAULT_WATERING_FREQ);
-    Serial.print(", hoursTillWatering[");
-    Serial.print(String(i));
-    Serial.print("] = ");
-    Serial.println(String(hoursTillWatering[i]));
-    // 49 = ASCII '1'
-    secondsOfWatering[i] = prefs.getUInt(PREF_SEC_WATERING_AMOUNT + char(49 + i), 
-                                         DEFAULT_WATERING_AMOUNT);
-    Serial.print(", secondsOfWatering[");
-    Serial.print(String(i));
-    Serial.print("] = ");
-    Serial.println(String(secondsOfWatering[i]));
-  }
+  // pump 1
+  wateringFreq[0] = prefs.getUInt(PREF_P1_WATERING_FREQ, DEFAULT_WATERING_FREQ);
+  Serial.print("Load from prefs: P1, wateringFreq   = ");
+  Serial.println(String(wateringFreq[0]));
+  nextWatering[0] = prefs.getUInt(PREF_P1_NEXT_WATERING, DEFAULT_WATERING_FREQ);
+  Serial.print("Load from prefs: P1, nextWatering   = ");
+  Serial.println(String(nextWatering[0]));
+  wateringAmount[0] = prefs.getUInt(PREF_P1_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
+  Serial.print("Load from prefs: P1, wateringAmount = ");
+  Serial.println(String(wateringAmount[0]));
+  // pump 2
+  wateringFreq[1] = prefs.getUInt(PREF_P2_WATERING_FREQ, DEFAULT_WATERING_FREQ);
+  Serial.print("Load from prefs: P2, wateringFreq   = ");
+  Serial.println(String(wateringFreq[1]));
+  nextWatering[1] = prefs.getUInt(PREF_P2_NEXT_WATERING, DEFAULT_WATERING_FREQ);
+  Serial.print("Load from prefs: P2, nextWatering   = ");
+  Serial.println(String(nextWatering[1]));
+  wateringAmount[1] = prefs.getUInt(PREF_P2_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
+  Serial.print("Load from prefs: P2, wateringAmount = ");
+  Serial.println(String(wateringAmount[1]));
+  // pump 3
+  wateringFreq[2] = prefs.getUInt(PREF_P3_WATERING_FREQ, DEFAULT_WATERING_FREQ);
+  Serial.print("Load from prefs: P3, wateringFreq   = ");
+  Serial.println(String(wateringFreq[2]));
+  nextWatering[2] = prefs.getUInt(PREF_P3_NEXT_WATERING, DEFAULT_WATERING_FREQ);
+  Serial.print("Load from prefs: P3, nextWatering   = ");
+  Serial.println(String(nextWatering[2]));
+  wateringAmount[2] = prefs.getUInt(PREF_P3_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
+  Serial.print("Load from prefs: P3, wateringAmount = ");
+  Serial.println(String(wateringAmount[2]));
+  // pump 4
+  wateringFreq[3] = prefs.getUInt(PREF_P4_WATERING_FREQ, DEFAULT_WATERING_FREQ);
+  Serial.print("Load from prefs: P4, wateringFreq   = ");
+  Serial.println(String(wateringFreq[3]));
+  nextWatering[3] = prefs.getUInt(PREF_P4_NEXT_WATERING, DEFAULT_WATERING_FREQ);
+  Serial.print("Load from prefs: P4, nextWatering   = ");
+  Serial.println(String(nextWatering[3]));
+  wateringAmount[3] = prefs.getUInt(PREF_P4_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
+  Serial.print("Load from prefs: P4, wateringAmount = ");
+  Serial.println(String(wateringAmount[3]));
   prefs.end();
 }
 
@@ -267,7 +266,7 @@ void clearInfoBar() {
 //  time, nanny number, wifi, mqtt, water, battery
 //***************************************************************************************************
   tft.fillRect(0, 0, 
-               TFT_HEIGHT - layoutButtonWidth,  layoutInfoBarHeight, 
+               TFT_HEIGHT - LAYOUT_BUTTON_WIDTH,  LAYOUT_INFO_BAR_HEIGHT, 
                COLOR_BG_INFO_BAR);
 }
 
@@ -275,8 +274,8 @@ void clearMainArea() {
 //***************************************************************************************************
 //  available for any information
 //***************************************************************************************************
-  tft.fillRect(0, layoutInfoBarHeight, 
-               TFT_HEIGHT - layoutButtonWidth, TFT_WIDTH - layoutInfoBarHeight - layoutStatusBarHeight, 
+  tft.fillRect(0, LAYOUT_INFO_BAR_HEIGHT, 
+               TFT_HEIGHT - LAYOUT_BUTTON_WIDTH, TFT_WIDTH - LAYOUT_INFO_BAR_HEIGHT - LAYOUT_STATUS_BAR_HEIGHT, 
                COLOR_BG_MAIN_AREA);
 }
 
@@ -284,8 +283,8 @@ void clearStatusBar() {
 //***************************************************************************************************
 //  
 //***************************************************************************************************
-  tft.fillRect(0, TFT_WIDTH - layoutStatusBarHeight, 
-               TFT_HEIGHT - layoutButtonWidth,  layoutStatusBarHeight, 
+  tft.fillRect(0, TFT_WIDTH - LAYOUT_STATUS_BAR_HEIGHT, 
+               TFT_HEIGHT - LAYOUT_BUTTON_WIDTH,  LAYOUT_STATUS_BAR_HEIGHT, 
                COLOR_BG_STATUS_BAR);
 }
 
@@ -293,8 +292,8 @@ void clearTopBtn() {
 //***************************************************************************************************
 //  icon and text
 //***************************************************************************************************
-  tft.fillRect(TFT_HEIGHT - layoutButtonWidth, 0,
-               layoutButtonWidth, TFT_WIDTH / 2, 
+  tft.fillRect(TFT_HEIGHT - LAYOUT_BUTTON_WIDTH, 0,
+               LAYOUT_BUTTON_WIDTH, TFT_WIDTH / 2, 
                COLOR_BG_TOP_BTN);
 }
 
@@ -302,8 +301,8 @@ void clearBottomBtn() {
 //***************************************************************************************************
 //  icon and text
 //***************************************************************************************************
-  tft.fillRect(TFT_HEIGHT - layoutButtonWidth, TFT_WIDTH / 2,
-               layoutButtonWidth, TFT_WIDTH - (TFT_WIDTH / 2), 
+  tft.fillRect(TFT_HEIGHT - LAYOUT_BUTTON_WIDTH, TFT_WIDTH / 2,
+               LAYOUT_BUTTON_WIDTH, TFT_WIDTH - (TFT_WIDTH / 2), 
                COLOR_BG_BOTTOM_BTN);
 }
 
@@ -329,7 +328,7 @@ void showProgInfo() {
   tft.setTextColor(COLOR_FG_STATUS_BAR, COLOR_BG_STATUS_BAR);
   tft.setTextDatum(TL_DATUM);
   xpos = 8;
-  ypos = TFT_WIDTH - layoutStatusBarHeight + 4;
+  ypos = TFT_WIDTH - LAYOUT_STATUS_BAR_HEIGHT + 4;
   strcpy(temp, TEXT_VERSION);
   strcat(temp, " ");
   strcat(temp, VERSION);
@@ -377,7 +376,7 @@ void showScreen() {
 //  show graphics and texts for each screen
 //***************************************************************************************************
   int xpos = 10;  // left margin
-  int ypos = (TFT_WIDTH - layoutInfoBarHeight - layoutStatusBarHeight) / 2 ;  // top margin
+  int ypos = (TFT_WIDTH - LAYOUT_BUTTON_WIDTH - LAYOUT_STATUS_BAR_HEIGHT) / 2 ;  // top margin
   char temp[30];  // for string concatination
 
   clearMainArea();
@@ -397,12 +396,12 @@ void showBtnTClicked() {
 //***************************************************************************************************
 //  
 //***************************************************************************************************
-  tft.fillRect(TFT_HEIGHT - layoutButtonWidth, 0,
-               layoutButtonWidth, TFT_WIDTH / 2, 
+  tft.fillRect(TFT_HEIGHT - LAYOUT_BUTTON_WIDTH, 0,
+               LAYOUT_BUTTON_WIDTH, TFT_WIDTH / 2, 
                COLOR_BG_TOP_BTN_PRESS);
   delay(200);
-  tft.fillRect(TFT_HEIGHT - layoutButtonWidth, 0,
-               layoutButtonWidth, TFT_WIDTH / 2, 
+  tft.fillRect(TFT_HEIGHT - LAYOUT_BUTTON_WIDTH, 0,
+               LAYOUT_BUTTON_WIDTH, TFT_WIDTH / 2, 
                COLOR_BG_TOP_BTN);
 
   btnTClicked = false;
@@ -412,12 +411,12 @@ void showBtnBClicked() {
 //***************************************************************************************************
 //  
 //***************************************************************************************************
-  tft.fillRect(TFT_HEIGHT - layoutButtonWidth, TFT_WIDTH / 2,
-               layoutButtonWidth, TFT_WIDTH - (TFT_WIDTH / 2), 
+  tft.fillRect(TFT_HEIGHT - LAYOUT_BUTTON_WIDTH, TFT_WIDTH / 2,
+               LAYOUT_BUTTON_WIDTH, TFT_WIDTH - (TFT_WIDTH / 2), 
                COLOR_BG_BOTTOM_BTN_PRESS);
   delay(200);
-  tft.fillRect(TFT_HEIGHT - layoutButtonWidth, TFT_WIDTH / 2,
-               layoutButtonWidth, TFT_WIDTH - (TFT_WIDTH / 2), 
+  tft.fillRect(TFT_HEIGHT - LAYOUT_BUTTON_WIDTH, TFT_WIDTH / 2,
+               LAYOUT_BUTTON_WIDTH, TFT_WIDTH - (TFT_WIDTH / 2), 
                COLOR_BG_BOTTOM_BTN);
   
   btnBClicked = false;
@@ -454,8 +453,8 @@ void showSystemNumber() {
   const int posFromRight = 5;
   const int radius = 9;
   
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) + radius - xPosAdjust;
-  int ypos = layoutInfoBarHeight / 2;
+  int xpos = TFT_HEIGHT - LAYOUT_BUTTON_WIDTH - (posFromRight * LAYOUT_INFO_BAR_HEIGHT) + radius - LAYOUT_X_POS_ADJUST;
+  int ypos = LAYOUT_INFO_BAR_HEIGHT / 2;
 
   tft.fillCircle(xpos, ypos, radius, COLOR_CIRCLE);
   tft.setTextColor(COLOR_FG_INFO_BAR, COLOR_CIRCLE);
@@ -467,12 +466,12 @@ void showSystemNumber() {
 
 void connectAndShowWifiStatus() {
 //***************************************************************************************************
-//  stacked to the right on info bar at the top
+//  stacked to the right of the info bar at the top
 //***************************************************************************************************
   const int posFromRight = 4;
 
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
-  int ypos = (layoutInfoBarHeight - iconHeight) / 2;
+  int xpos = TFT_HEIGHT - LAYOUT_BUTTON_WIDTH - (posFromRight * LAYOUT_INFO_BAR_HEIGHT) - LAYOUT_X_POS_ADJUST;
+  int ypos = (LAYOUT_INFO_BAR_HEIGHT - iconHeight) / 2;
 
   int wifiRetries = 0;
   uint16_t color;
@@ -503,8 +502,8 @@ void connectAndShowMQTTStatus() {
 //***************************************************************************************************
   const int posFromRight = 3;
 
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
-  int ypos = (layoutInfoBarHeight - iconHeight) / 2;
+  int xpos = TFT_HEIGHT - LAYOUT_BUTTON_WIDTH - (posFromRight * LAYOUT_INFO_BAR_HEIGHT) - LAYOUT_X_POS_ADJUST;
+  int ypos = (LAYOUT_INFO_BAR_HEIGHT - iconHeight) / 2;
 
   uint16_t color;
 
@@ -530,8 +529,8 @@ void showAndPublishBatteryVoltage() {
 //***************************************************************************************************
   const int posFromRight = 2;
 
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
-  int ypos = (layoutInfoBarHeight - iconHeight) / 2;
+  int xpos = TFT_HEIGHT - LAYOUT_BUTTON_WIDTH - (posFromRight * LAYOUT_INFO_BAR_HEIGHT) - LAYOUT_X_POS_ADJUST;
+  int ypos = (LAYOUT_INFO_BAR_HEIGHT - iconHeight) / 2;
 
   uint16_t color;
 
@@ -544,9 +543,6 @@ void showAndPublishBatteryVoltage() {
 
   uint16_t v = analogRead(ADC_PIN);
   float batteryVoltage = ((float)v / 4095.0) * 2.0 * 3.3 * (ADC_VREF / 1100.0);
-
-  String voltage = "Bat.: " + String(batteryVoltage) + "V";
-  Serial.println(voltage);
 
   if(batteryVoltage < BATTERY_VERY_LOW) {
     color = TFT_RED;
@@ -567,8 +563,8 @@ void showAndPublishWaterLevel() {
 //***************************************************************************************************
   const int posFromRight = 1;
 
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
-  int ypos = (layoutInfoBarHeight - iconHeight) / 2;
+  int xpos = TFT_HEIGHT - LAYOUT_BUTTON_WIDTH - (posFromRight * LAYOUT_INFO_BAR_HEIGHT) - LAYOUT_X_POS_ADJUST;
+  int ypos = (LAYOUT_INFO_BAR_HEIGHT - iconHeight) / 2;
 
   uint16_t color;
 
@@ -582,10 +578,9 @@ void showAndPublishWaterLevel() {
   } else {
     color = TFT_GREEN;
   }
-  Serial.print("Container = ");
-  Serial.print(percent);
-  Serial.println("%");
   tft.drawXBitmap(xpos, ypos, iconContainer, iconWidth, iconHeight, color, COLOR_BG_INFO_BAR);
+  
+  mqttPublishValue(mqttTopicWaterLevel, String(remainingWater));
 }
 
 void showContainerSize() {
@@ -594,8 +589,8 @@ void showContainerSize() {
 //***************************************************************************************************
   const int posFromRight = 0;
 
-  int xpos = TFT_HEIGHT - layoutButtonWidth - (posFromRight * layoutInfoBarHeight) - xPosAdjust;
-  int ypos = ((layoutInfoBarHeight - iconHeight) / 2) + 8;
+  int xpos = TFT_HEIGHT - LAYOUT_BUTTON_WIDTH - (posFromRight * LAYOUT_INFO_BAR_HEIGHT) - LAYOUT_X_POS_ADJUST;
+  int ypos = ((LAYOUT_INFO_BAR_HEIGHT - iconHeight) / 2) + 8;
 
   String containerChar;
 
@@ -631,6 +626,8 @@ void mqttSubscribeToTopics() {
   pumpCommand = baseCommand;
   baseCommand.concat(mqttCommandHour);
   mqttClient.subscribe(baseCommand.c_str());
+  Serial.print("MQTT subscribed to: ");
+  Serial.println(baseCommand.c_str());
 
   for(int i = 1; i <= NUMBER_OF_PUMPS; i++) {
     temp = pumpCommand;
@@ -639,9 +636,13 @@ void mqttSubscribeToTopics() {
     temp1 =temp;
     temp1.concat(mqttCommandFreq);
     mqttClient.subscribe(temp1.c_str());
+    Serial.print("MQTT subscribed to: ");
+    Serial.println(temp1.c_str());
     temp2 = temp;
     temp2.concat(mqttCommandAmount);
     mqttClient.subscribe(temp2.c_str());
+    Serial.print("MQTT subscribed to: ");
+    Serial.println(temp2.c_str());
   }
 }
 
@@ -667,42 +668,60 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   payload[length] = '\0';
   String stringValue = String((char*) payload);
 
+  Serial.print("MQTT callback: ");
+  Serial.print(topicString);
+  Serial.print(" = ");
+  Serial.println(stringValue);
+
   if(shortenedTopic == mqttCommandHour) {
-    Serial.println("MQTT: new watering time received");
-//###################################################################################################
-// todo
-// update the pref
-//###################################################################################################
-    
+    prefs.begin("nanny", false);
+    prefs.putUInt(PREF_WATERING_HOUR, stringValue.toInt());
+    prefs.end();  
   } else {
     pump = shortenedTopic.toInt();    // returns 0 if no number is found
     if(pump <= 0 || pump > NUMBER_OF_PUMPS) {
-      Serial.print("MQTT command not recognized: ");
+      Serial.print("MQTT callback: command not recognized = ");
       Serial.println(shortenedTopic);
     } else {
       shortenedPumpTopic = shortenedTopic.substring(2);   // single digit pump number and '/'
       if(shortenedPumpTopic == mqttCommandFreq) {
-        Serial.print("MQTT pump ");
-        Serial.print(pump);
-        Serial.println(": new watering frequency received");
-//###################################################################################################
-// todo
-// update pump specific pref
-//###################################################################################################
-
+        prefs.begin("nanny", false);
+        switch(pump) {
+          case 1:
+            prefs.putUInt(PREF_P1_WATERING_FREQ, stringValue.toInt());        
+            break;
+          case 2:
+            prefs.putUInt(PREF_P2_WATERING_FREQ, stringValue.toInt());        
+            break;
+          case 3:
+            prefs.putUInt(PREF_P3_WATERING_FREQ, stringValue.toInt());        
+            break;
+          case 4:
+            prefs.putUInt(PREF_P4_WATERING_FREQ, stringValue.toInt());        
+            break;
+        }
+        prefs.end();  
       } else if(shortenedPumpTopic == mqttCommandAmount){
-        Serial.print("MQTT pump ");
-        Serial.print(pump);
-        Serial.println(": new watering amount received");
-//###################################################################################################
-// todo
-// update pump specific pref
-//###################################################################################################
-        
+        prefs.begin("nanny", false);
+        switch(pump) {
+          case 1:
+            prefs.putUInt(PREF_P1_WATERING_AMOUNT, stringValue.toInt());        
+            break;
+          case 2:
+            prefs.putUInt(PREF_P2_WATERING_AMOUNT, stringValue.toInt());        
+            break;
+          case 3:
+            prefs.putUInt(PREF_P3_WATERING_AMOUNT, stringValue.toInt());        
+            break;
+          case 4:
+            prefs.putUInt(PREF_P4_WATERING_AMOUNT, stringValue.toInt());        
+            break;
+        }
+        prefs.end();  
       } else {
-        Serial.print("MQTT pump ");
+        Serial.print("MQTT callback: pump ");
         Serial.print(pump);
-        Serial.print(" command not recognized: ");
+        Serial.print(", command not recognized = ");
         Serial.println(shortenedPumpTopic);        
       }
     }

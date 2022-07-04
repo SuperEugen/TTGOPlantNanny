@@ -72,6 +72,24 @@ const char* timezone =            "Europe/Berlin";
 #define WATERING_AMOUNT_NORMAL    2.0   // 2 seconds
 #define WATERING_AMOUNT_A_LITTLE  1.0   // 1 seconds
 
+// preference names
+#define PREF_WATERING_HOUR        "wh"
+#define PREF_CONTAINER_SIZE       "cs"
+#define PREF_REMAINING_WATER      "rw"
+#define PREF_PUMP_THROUGHPUT      "pt"
+#define PREF_P1_WATERING_FREQ     "p1wf"
+#define PREF_P2_WATERING_FREQ     "p2wf"
+#define PREF_P3_WATERING_FREQ     "p3wf"
+#define PREF_P4_WATERING_FREQ     "p4wf"
+#define PREF_P1_NEXT_WATERING     "p1nw"
+#define PREF_P2_NEXT_WATERING     "p2nw"
+#define PREF_P3_NEXT_WATERING     "p3nw"
+#define PREF_P4_NEXT_WATERING     "p4nw"
+#define PREF_P1_WATERING_AMOUNT   "p1wa"
+#define PREF_P2_WATERING_AMOUNT   "p2wa"
+#define PREF_P3_WATERING_AMOUNT   "p3wa"
+#define PREF_P4_WATERING_AMOUNT   "p4wa"
+
 // default values
 #define DEFAULT_WATERING_HOUR     8     // 08:00
 #define DEFAULT_WATERING_FREQ     24    // every day
@@ -97,6 +115,14 @@ const char* mqttTopicAmount =     "watering-amount";      // per pump setting
 const char* mqttCommandHour =     "command-hour";         // sets watering-hour
 const char* mqttCommandFreq =     "command-freq";         // per pump command, sets watering-frequency
 const char* mqttCommandAmount =   "command-amount";       // per pump command, sets watering-amount
+
+//***************************************************************************************************
+//  user interface
+//***************************************************************************************************
+#define LAYOUT_BUTTON_WIDTH       64
+#define LAYOUT_INFO_BAR_HEIGHT    24
+#define LAYOUT_STATUS_BAR_HEIGHT  15
+#define LAYOUT_X_POS_ADJUST       8                         // icons in status bar shifted left
 
 // all color values are 16bit i.e. RGB565
 // background colors
