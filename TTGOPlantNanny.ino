@@ -31,7 +31,7 @@
 //
 //  Dev history:
 //    28.08.2019, IH:         First set-up, influenced from Esp32-Radio (Ed Smallenburg), 
-//                            TTGO T-Display exmple, espaper-weatherstation (SQUIX), 
+//                            TTGO T-Display exmple, epaper-weatherstation (SQUIX), 
 //                            TFT_eSPI example (Bodmer)
 //    29.08.2019, IH:         TFT handled
 //    30.08.2019, IH:         more TFT_eSPI understanding
@@ -50,10 +50,17 @@
 //    04.07.2022, IH:         problems with pref storage
 //    05.07.2022, IH:         changed handling of start time
 //    06.07.2022, IH:         added button icon for refill
+//    14.07.2022, IH:         added more icons and screens
+//    15.07.2022, IH:         some refactoring
+//    17.07.2022, IH:         more clean-up
+//    11.08.2022, IH:         calibration 
+//    13.08.2022, IH:         menu system
+//    22.08.2022, IH:         updated settings.h
+//    28.08.2022, IH:         updated container size and empty container calc and water now button
 //
 //***************************************************************************************************
 
-#define VERSION               "0.10"   // 06.07.22
+#define VERSION               "0.18"   // 28.08.22
 
 // libraries
 #include <Preferences.h>
@@ -94,19 +101,25 @@ unsigned long timeStamp;
 //***************************************************************************************************
 //  Data stored in preferences
 //***************************************************************************************************
-uint16_t containerSize;
-int16_t remainingWater;
-uint16_t pumpThroughput;
-uint16_t wateringFreq[NUMBER_OF_PUMPS];
-uint16_t nextWatering[NUMBER_OF_PUMPS];
-uint16_t wateringAmount[NUMBER_OF_PUMPS];
+int16_t containerSizeCat;                   // category 1, 2, 3, 4
+int16_t remainingWaterML;                   // in milliliter
+int16_t wateringFreqCat[NUMBER_OF_PUMPS];   // category 0, 1, 2, 3, 4
+int16_t nextWateringH[NUMBER_OF_PUMPS];     // in hours
+int16_t wateringAmountCat[NUMBER_OF_PUMPS]; // category 1, 2, 3, 4
 
 //***************************************************************************************************
 //  Screens
 //***************************************************************************************************
-const int scrMain =       1;
+const int scrMain =         1;
+const int scrRefillYN =     2;
+const int scrWaterNowYN =   3;
 
 int currentScreen;
+int currentPump;
+int currentPAction;
+int currentPTime;
+int currentPAmount;
+int currentCSize;
 
 void setup() {
 //***************************************************************************************************
@@ -123,11 +136,21 @@ void setup() {
 
   // draw screen layout, show some info and system number
   tft.fillScreen(TFT_BLACK);
-  clearInfoBar();
+  // info bar
+  tft.fillRect(0, 0, 
+               LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH,  LAYOUT_INFO_BAR_HEIGHT, 
+               COLOR_BG_INFO_BAR);
+  // main area
   clearMainArea();
-  clearStatusBar();
-  clearTopBtn();
-  clearBottomBtn();
+  // status bar
+  tft.fillRect(0, LAYOUT_LANDSCAPE_HEIGHT - LAYOUT_STATUS_BAR_HEIGHT, 
+               LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH,  LAYOUT_STATUS_BAR_HEIGHT, 
+               COLOR_BG_STATUS_BAR);
+  // top button
+  clearTButton();
+  // bottom button
+  clearBButton();
+  // infos on info bar
   showProgInfo();
   showSystemNumber();
   loadPrefs();
@@ -160,7 +183,15 @@ void setup() {
 
     // prepare ui
     currentScreen = scrMain;
-    showScreen();
+    drawButtonIcons();
+    currentPump = 1;
+    currentPAction = 1;
+    currentPTime = 1;
+    currentPAmount = 1;
+    currentCSize = 1;
+    
+    currentPump = 1;
+    drawMainArea();
     timeStamp = millis();
   } else {
     Serial.print("No WiFi -> ");
@@ -172,8 +203,6 @@ void loop() {
 //***************************************************************************************************
 //  LOOP
 //***************************************************************************************************
-  int lastScreen = 0;
-  
   if(minuteChanged() && wifiConnected) {
     showTime();
   }
@@ -183,18 +212,34 @@ void loop() {
   }
   mqttClient.loop();
 
-  doTimedJobIfNecessary();  // and go to sleep after job is done
+  // is it full hour?
+  if(minute() == 0) {
+    if(remainingWaterML <= 0) {
+      Serial.println("Water tank empty");
+    } else {
+      for(int i = 0; i < NUMBER_OF_PUMPS; i++) {
+        nextWateringH[i] -= 1;
+      }
+      waterIfDue();
+    }
+    setTimerAndGoToSleep();
+  }
 
   btnT.loop();
   btnB.loop();
-  if(btnTClicked) {
+
+  if(btnTClicked || btnBClicked) {
     timeStamp = millis();
-    showBtnTClicked();
+    drawButtonIcons();
+    calcNextScreen();
+    btnTClicked = false;
+    btnBClicked = false;
+    delay(200);
+    drawButtonIcons();
+    drawMainArea();
   }
-  if(btnBClicked) {
-    timeStamp = millis();
-    showBtnBClicked();
-  }
+  
+  mqttClient.loop();
 
   if((millis() - timeStamp) > (INACTIVITY_THRESHOLD * 1000)) {
     Serial.print("No activity -> ");
@@ -207,101 +252,116 @@ void loadPrefs() {
 //  name space is "nanny", these name value pairs store data during deep sleep
 //***************************************************************************************************
   prefs.begin("nanny", false);
-  containerSize = prefs.getUInt(PREF_CONTAINER_SIZE, CONTAINER_SIZE_SMALL);
+  containerSizeCat = prefs.getUInt(PREF_CONTAINER_SIZE, DEFAULT_CONTAINER_SIZE);
   Serial.print("Load from prefs: containerSize      = ");
-  Serial.println(String(containerSize));
-  remainingWater = prefs.getUInt(PREF_REMAINING_WATER, CONTAINER_SIZE_SMALL);
+  Serial.println(String(containerSizeCat));
+  remainingWaterML = prefs.getUInt(PREF_REMAINING_WATER, DEFAULT_CONTAINER_SIZE);
   Serial.print("Load from prefs: remainingWater     = ");
-  Serial.println(String(remainingWater));
-  pumpThroughput = prefs.getUInt(PREF_PUMP_THROUGHPUT, PUMP_BLACK);
-  Serial.print("Load from prefs: pumpThroughput     = ");
-  Serial.println(String(pumpThroughput));
+  Serial.println(String(remainingWaterML));
   // pump 1
-  wateringFreq[0] = prefs.getUInt(PREF_P1_WATERING_FREQ, DEFAULT_WATERING_FREQ);
+  wateringFreqCat[0] = prefs.getUInt(PREF_P1_WATERING_FREQ, DEFAULT_WATERING_FREQ);
   Serial.print("Load from prefs: P1, wateringFreq   = ");
-  Serial.println(String(wateringFreq[0]));
-  nextWatering[0] = prefs.getUInt(PREF_P1_NEXT_WATERING, DEFAULT_WATERING_FREQ);
+  Serial.println(String(wateringFreqCat[0]));
+  nextWateringH[0] = prefs.getUInt(PREF_P1_NEXT_WATERING, DEFAULT_WATERING_FREQ);
   Serial.print("Load from prefs: P1, nextWatering   = ");
-  Serial.println(String(nextWatering[0]));
-  wateringAmount[0] = prefs.getUInt(PREF_P1_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
+  Serial.println(String(nextWateringH[0]));
+  wateringAmountCat[0] = prefs.getUInt(PREF_P1_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
   Serial.print("Load from prefs: P1, wateringAmount = ");
-  Serial.println(String(wateringAmount[0]));
+  Serial.println(String(wateringAmountCat[0]));
   // pump 2
-  wateringFreq[1] = prefs.getUInt(PREF_P2_WATERING_FREQ, DEFAULT_WATERING_FREQ);
+  wateringFreqCat[1] = prefs.getUInt(PREF_P2_WATERING_FREQ, DEFAULT_WATERING_FREQ);
   Serial.print("Load from prefs: P2, wateringFreq   = ");
-  Serial.println(String(wateringFreq[1]));
-  nextWatering[1] = prefs.getUInt(PREF_P2_NEXT_WATERING, DEFAULT_WATERING_FREQ);
+  Serial.println(String(wateringFreqCat[1]));
+  nextWateringH[1] = prefs.getUInt(PREF_P2_NEXT_WATERING, DEFAULT_WATERING_FREQ);
   Serial.print("Load from prefs: P2, nextWatering   = ");
-  Serial.println(String(nextWatering[1]));
-  wateringAmount[1] = prefs.getUInt(PREF_P2_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
+  Serial.println(String(nextWateringH[1]));
+  wateringAmountCat[1] = prefs.getUInt(PREF_P2_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
   Serial.print("Load from prefs: P2, wateringAmount = ");
-  Serial.println(String(wateringAmount[1]));
+  Serial.println(String(wateringAmountCat[1]));
   // pump 3
-  wateringFreq[2] = prefs.getUInt(PREF_P3_WATERING_FREQ, DEFAULT_WATERING_FREQ);
+  wateringFreqCat[2] = prefs.getUInt(PREF_P3_WATERING_FREQ, DEFAULT_WATERING_FREQ);
   Serial.print("Load from prefs: P3, wateringFreq   = ");
-  Serial.println(String(wateringFreq[2]));
-  nextWatering[2] = prefs.getUInt(PREF_P3_NEXT_WATERING, DEFAULT_WATERING_FREQ);
+  Serial.println(String(wateringFreqCat[2]));
+  nextWateringH[2] = prefs.getUInt(PREF_P3_NEXT_WATERING, DEFAULT_WATERING_FREQ);
   Serial.print("Load from prefs: P3, nextWatering   = ");
-  Serial.println(String(nextWatering[2]));
-  wateringAmount[2] = prefs.getUInt(PREF_P3_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
+  Serial.println(String(nextWateringH[2]));
+  wateringAmountCat[2] = prefs.getUInt(PREF_P3_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
   Serial.print("Load from prefs: P3, wateringAmount = ");
-  Serial.println(String(wateringAmount[2]));
+  Serial.println(String(wateringAmountCat[2]));
   // pump 4
-  wateringFreq[3] = prefs.getUInt(PREF_P4_WATERING_FREQ, DEFAULT_WATERING_FREQ);
+  wateringFreqCat[3] = prefs.getUInt(PREF_P4_WATERING_FREQ, DEFAULT_WATERING_FREQ);
   Serial.print("Load from prefs: P4, wateringFreq   = ");
-  Serial.println(String(wateringFreq[3]));
-  nextWatering[3] = prefs.getUInt(PREF_P4_NEXT_WATERING, DEFAULT_WATERING_FREQ);
+  Serial.println(String(wateringFreqCat[3]));
+  nextWateringH[3] = prefs.getUInt(PREF_P4_NEXT_WATERING, DEFAULT_WATERING_FREQ);
   Serial.print("Load from prefs: P4, nextWatering   = ");
-  Serial.println(String(nextWatering[3]));
-  wateringAmount[3] = prefs.getUInt(PREF_P4_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
+  Serial.println(String(nextWateringH[3]));
+  wateringAmountCat[3] = prefs.getUInt(PREF_P4_WATERING_AMOUNT, DEFAULT_WATERING_AMOUNT);
   Serial.print("Load from prefs: P4, wateringAmount = ");
-  Serial.println(String(wateringAmount[3]));
+  Serial.println(String(wateringAmountCat[3]));
   prefs.end();
 }
 
-void clearInfoBar() {
-//***************************************************************************************************
-//  time, nanny number, wifi, mqtt, water, battery
-//***************************************************************************************************
-  tft.fillRect(0, 0, 
-               LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH,  LAYOUT_INFO_BAR_HEIGHT, 
-               COLOR_BG_INFO_BAR);
+int translateContainerSize(int category) {
+  int value;
+  
+  switch(category) {
+    case 1:
+      value = CONTAINER_SIZE_SMALL;
+      break;
+    case 2:
+      value = CONTAINER_SIZE_TALL;
+      break;
+    case 3:
+      value = CONTAINER_SIZE_FLAT;
+      break;
+    default:
+      value = CONTAINER_SIZE_BIG;
+      break;
+  }
+  return(value);
 }
 
-void clearMainArea() {
-//***************************************************************************************************
-//  available for any information
-//***************************************************************************************************
-  tft.fillRect(0, LAYOUT_INFO_BAR_HEIGHT, 
-               LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT - LAYOUT_INFO_BAR_HEIGHT - LAYOUT_STATUS_BAR_HEIGHT, 
-               COLOR_BG_MAIN_AREA);
+int translateWateringFreq(int category) {
+  int value;
+  
+  switch(category) {
+    case 0:
+      value = WATERING_FREQ_OFF;
+      break;
+    case 1:
+      value = WATERING_FREQ_VERY_SELDOM;
+      break;
+    case 2:
+      value = WATERING_FREQ_SELDOM;
+      break;
+    case 3:
+      value = WATERING_FREQ_NORMAL;
+      break;
+    default:
+      value = WATERING_FREQ_OFTEN;
+      break;
+  }
+  return(value);
 }
 
-void clearStatusBar() {
-//***************************************************************************************************
-//  
-//***************************************************************************************************
-  tft.fillRect(0, LAYOUT_LANDSCAPE_HEIGHT - LAYOUT_STATUS_BAR_HEIGHT, 
-               LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH,  LAYOUT_STATUS_BAR_HEIGHT, 
-               COLOR_BG_STATUS_BAR);
-}
-
-void clearTopBtn() {
-//***************************************************************************************************
-//  icon and text
-//***************************************************************************************************
-  tft.fillRect(LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH, 0,
-               LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT / 2, 
-               COLOR_BG_TOP_BTN);
-}
-
-void clearBottomBtn() {
-//***************************************************************************************************
-//  icon and text
-//***************************************************************************************************
-  tft.fillRect(LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT / 2,
-               LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT - (LAYOUT_LANDSCAPE_HEIGHT / 2), 
-               COLOR_BG_BOTTOM_BTN);
+int translateWateringAmount(int category) {
+  int value;
+  
+  switch(category) {
+    case 1:
+      value = PUMP_25ML;
+      break;
+    case 2:
+      value = PUMP_50ML;
+      break;
+    case 3:
+      value = PUMP_75ML;
+      break;
+    default:
+      value = PUMP_100ML;
+      break;
+  }
+  return(value);
 }
 
 void showProgInfo() {
@@ -326,7 +386,7 @@ void showProgInfo() {
   tft.setTextColor(COLOR_FG_STATUS_BAR, COLOR_BG_STATUS_BAR);
   tft.setTextDatum(TL_DATUM);
   xpos = 8;
-  ypos = LAYOUT_LANDSCAPE_HEIGHT - LAYOUT_STATUS_BAR_HEIGHT + 4;
+  ypos = LAYOUT_LANDSCAPE_HEIGHT - LAYOUT_STATUS_BAR_HEIGHT + 2;
   strcpy(temp, TEXT_VERSION);
   strcat(temp, " ");
   strcat(temp, VERSION);
@@ -334,114 +394,167 @@ void showProgInfo() {
   tft.drawString(temp, xpos, ypos, GFXFF);
 }
 
-void doTimedJobIfNecessary() {
+void clearMainArea() {
 //***************************************************************************************************
-//  update PREF_PX_NEXT_WATERING for each pump and check if it's watering time and if any pump is due
+//  
 //***************************************************************************************************
-  const int timerWindow = 30;   // to adjust for inaccuracies of timer
-  int i;
-
-  // is it full hour?
-  if((minute() == 0) && (second() < timerWindow)) {
-    if(remainingWater < PUMP_RUNS_DRY) {
-      Serial.println("Water tank empty");
-    } else {
-      for(i = 0; i < NUMBER_OF_PUMPS; i++) {
-        // recalc nextWatering
-        nextWatering[i] -= 1;
-        // check if pump is due
-        if(nextWatering[i] <= 0) {
-          // set pump on
-          switch(i) {
-            case 0:
-              digitalWrite(PUMP_1, LOW);
-              break;
-            case 1:
-              digitalWrite(PUMP_2, LOW);
-              break;
-            case 2:
-              digitalWrite(PUMP_3, LOW);
-              break;
-            case 3:
-              digitalWrite(PUMP_4, LOW);
-              break;
-          }
-          // wait till amount is reached
-          delay(wateringAmount[i] * 1000);
-          // set pump off and write pref
-          switch(i) {
-            case 0:
-              digitalWrite(PUMP_1, HIGH);
-              break;
-            case 1:
-              digitalWrite(PUMP_2, HIGH);
-              break;
-            case 2:
-              digitalWrite(PUMP_3, HIGH);
-              break;
-            case 3:
-              digitalWrite(PUMP_4, HIGH);
-              break;
-          }
-          // wait a little
-          delay(100);
-          // adjust waterRemaining
-          remainingWater -= wateringAmount[i] * PUMP_BLACK;
-          // adjust nextWatering
-          nextWatering[i] = wateringFreq[i];
-        }
-      }
-      showAndPublishWaterLevel();;  
-      prefs.begin("nanny", false);
-      prefs.putUInt(PREF_P1_NEXT_WATERING, nextWatering[0]);
-      prefs.putUInt(PREF_P2_NEXT_WATERING, nextWatering[1]);
-      prefs.putUInt(PREF_P3_NEXT_WATERING, nextWatering[2]);
-      prefs.putUInt(PREF_P4_NEXT_WATERING, nextWatering[3]);
-      prefs.end();
-    }
-    setTimerAndGoToSleep();    
-  } 
+  tft.fillRect(0, LAYOUT_INFO_BAR_HEIGHT, 
+               LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT - LAYOUT_INFO_BAR_HEIGHT - LAYOUT_STATUS_BAR_HEIGHT, 
+               COLOR_BG_MAIN_AREA);
 }
 
-void showScreen() {
+void clearTButton() {
 //***************************************************************************************************
-//  show graphics and texts for each screen
+//  
+//***************************************************************************************************
+  tft.fillRect(LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH, 0,
+               LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT / 2, 
+               COLOR_BG_TOP_BTN);
+}
+
+void clearBButton() {
+//***************************************************************************************************
+//  
+//***************************************************************************************************
+  tft.fillRect(LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT / 2,
+               LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT - (LAYOUT_LANDSCAPE_HEIGHT / 2), 
+               COLOR_BG_BOTTOM_BTN);
+}
+
+void drawButtonIcons() {
+//***************************************************************************************************
+//  icon and color depending on clicked status and current screen
+//***************************************************************************************************
+  int xpos = LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH + ((LAYOUT_BUTTON_WIDTH - iconWidthBig) / 2);
+  int ypos;
+  uint16_t fgcolor;
+
+  clearTButton();
+  clearBButton();
+  if(currentScreen == scrMain) {
+    // iconRefill and iconConfig
+    if(btnTClicked) {
+      fgcolor = COLOR_BUTTON_PRESSED;
+    } else {
+      fgcolor = TFT_SKYBLUE;
+    }
+    ypos = ((LAYOUT_LANDSCAPE_HEIGHT / 2) - iconHeightBig) / 2;
+    tft.drawXBitmap(xpos, ypos, iconRefill, iconWidthBig, iconHeightBig, fgcolor);
+    if(btnBClicked) {
+      fgcolor = COLOR_BUTTON_PRESSED;
+    } else {
+      fgcolor = TFT_LIGHTGREY;
+    }
+    ypos = (((LAYOUT_LANDSCAPE_HEIGHT / 2) - iconHeightBig) / 2) + (LAYOUT_LANDSCAPE_HEIGHT / 2);
+    tft.drawXBitmap(xpos, ypos, iconConfig, iconWidthBig, iconHeightBig, fgcolor);
+  } else {
+    // iconOK and iconNext
+    if(btnTClicked) {
+      fgcolor = COLOR_BUTTON_PRESSED;
+    } else {
+      fgcolor = TFT_GREEN;
+    }
+    ypos = ((LAYOUT_LANDSCAPE_HEIGHT / 2) - iconHeightBig) / 2;
+    tft.drawXBitmap(xpos, ypos, iconOK, iconWidthBig, iconHeightBig, fgcolor);
+    if(btnBClicked) {
+      fgcolor = COLOR_BUTTON_PRESSED;
+    } else {
+      fgcolor = TFT_MAGENTA;
+    }
+    ypos = (((LAYOUT_LANDSCAPE_HEIGHT / 2) - iconHeightBig) / 2) + (LAYOUT_LANDSCAPE_HEIGHT / 2);
+    tft.drawXBitmap(xpos, ypos, iconNext, iconWidthBig, iconHeightBig, fgcolor);
+  }
+}
+
+void calcNextScreen() {
+//***************************************************************************************************
+//  depending on current screen and button clicked
+//***************************************************************************************************
+  switch(currentScreen) {
+    case scrMain:
+      if(btnTClicked) {
+        currentScreen = scrRefillYN;
+      }
+      if(btnBClicked) {
+        currentScreen = scrWaterNowYN;
+      }
+      break;
+    case scrRefillYN:
+      if(btnTClicked) {
+        remainingWaterML = translateContainerSize(containerSizeCat);
+        showAndPublishWaterLevel();
+        currentScreen = scrMain;
+      }
+      if(btnBClicked) {
+        currentScreen = scrMain;
+      }
+      break;
+    case scrWaterNowYN:
+      if(btnTClicked) {
+        // water now all plants with set amount, reset next watering to new cycle for all pumps
+        for(int i = 0; i < NUMBER_OF_PUMPS; i++) {
+          nextWateringH[i] = 0;
+        }
+        waterIfDue();
+        currentScreen = scrMain;
+      }
+      if(btnBClicked) {
+        currentScreen = scrMain;
+      }
+      break;
+  }
+}
+
+void drawMainArea() {
+//***************************************************************************************************
+//  show graphics and texts depending on current screen
 //***************************************************************************************************
   int xpos = 10;  // left margin
   int ypos = (LAYOUT_LANDSCAPE_HEIGHT - LAYOUT_BUTTON_WIDTH - LAYOUT_STATUS_BAR_HEIGHT) / 2 ;  // top margin
   uint16_t color;
   char temp[30];  // for string concatination
-  int16_t simRemainingWater;
+  int16_t simRemainingWaterML;
   int simHours;
-  uint16_t simNextWatering[NUMBER_OF_PUMPS];
+  uint16_t simNextWateringH[NUMBER_OF_PUMPS];
   int i;
   int simDays;
   String tempString;
 
   clearMainArea();
-  clearTopBtn();
-  clearBottomBtn();
+  tft.setTextColor(COLOR_FG_MAIN_AREA, COLOR_BG_MAIN_AREA);
+  tft.setTextDatum(TL_DATUM);
+  tft.setFreeFont(FSS9);
+
   switch(currentScreen) {
     case scrMain:
-      // draw main area
-      tft.setTextColor(COLOR_FG_MAIN_AREA, COLOR_BG_MAIN_AREA);
-      tft.setTextDatum(TL_DATUM);
-      tft.setFreeFont(FSS9);
       // simulate watering
-      simRemainingWater = remainingWater;
+      simRemainingWaterML = remainingWaterML;
       simHours = 0;
       for(i=0; i < NUMBER_OF_PUMPS; i++) {
-        simNextWatering[i] = nextWatering[i];
+        simNextWateringH[i] = nextWateringH[i];
       }
-      while(simRemainingWater > PUMP_RUNS_DRY) {
+      while(simRemainingWaterML > 0) {
         for(i = 0; i < NUMBER_OF_PUMPS; i++) {
           // recalc simNextWatering
-          simNextWatering[i] -= 1;
+          simNextWateringH[i] -= 1;
           // check if pump is due
-          if(simNextWatering[i] <= 0) {
-            simRemainingWater -= wateringAmount[i] * PUMP_BLACK;
+          if(simNextWateringH[i] <= 0) {
+            switch(wateringAmountCat[i]) {
+              case 1:
+                simRemainingWaterML -= 25;
+                break;
+              case 2:
+                simRemainingWaterML -= 50;
+                break;
+              case 3:
+                simRemainingWaterML -= 75;
+                break;
+              default:
+                simRemainingWaterML -= 100;
+                break;
+            }
             // adjust simNextWatering
-            simNextWatering[i] = wateringFreq[i];            
+            simNextWateringH[i] = translateWateringFreq(wateringFreqCat[i]);            
           }
         }
         simHours += 1;
@@ -449,83 +562,91 @@ void showScreen() {
       tft.drawString(TEXT_REMAINING, xpos, ypos, GFXFF);
       simDays = simHours / 24;
       tempString = String(simDays);
-      if(simDays > 1) {
+      if(simDays != 1) {
         tempString = TEXT_DAYS;
       } else {
         tempString = TEXT_DAY;
       }
+      // draw main area
       tft.drawString(String(simDays) + " " + tempString, xpos, ypos + 20, GFXFF);
-      // draw buttons
-      showButtonIcon(TOP_BUTTON, iconRefill, TFT_SKYBLUE);
+      break;
+    case scrRefillYN:
+      // draw main area
+      tft.drawString("RefillYN", xpos, ypos + 20, GFXFF);
+      break;
+    case scrWaterNowYN:
+      // draw main area
+      tft.drawString("WaterNowYN", xpos, ypos + 20, GFXFF);
       break;
   }
 }
 
-void showButtonIcon(int button, const uint8_t* icon, uint16_t fgcolor) {
+void waterIfDue() {
 //***************************************************************************************************
-//  
+//  update PREF_PX_NEXT_WATERING for each pump and check if it's watering time and if any pump is due
 //***************************************************************************************************
-  int xpos = LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH + ((LAYOUT_BUTTON_WIDTH - iconWidthBig) / 2);
-  int ypos;
-  uint16_t bgcolor;
-
-  switch(button) {
-    case TOP_BUTTON:
-      ypos = ((LAYOUT_LANDSCAPE_HEIGHT / 2) - iconHeightBig) / 2;
-      if(btnTClicked) {
-        bgcolor = COLOR_BG_TOP_BTN_PRESS;
-      } else {
-        bgcolor = COLOR_BG_TOP_BTN;
+  for(int i = 0; i < NUMBER_OF_PUMPS; i++) {
+    if(nextWateringH[i] <= 0) {
+      // set pump on
+      switch(i) {
+        case 0:
+          digitalWrite(PUMP_1, LOW);
+          break;
+        case 1:
+          digitalWrite(PUMP_2, LOW);
+          break;
+        case 2:
+          digitalWrite(PUMP_3, LOW);
+          break;
+        case 3:
+          digitalWrite(PUMP_4, LOW);
+          break;
       }
-      break;
-    case BOTTOM_BUTTON:
-      ypos = (((LAYOUT_LANDSCAPE_HEIGHT / 2) - iconHeightBig) / 2) + (LAYOUT_LANDSCAPE_HEIGHT / 2);
-      if(btnBClicked) {
-        bgcolor = COLOR_BG_BOTTOM_BTN_PRESS;
-      } else {
-        bgcolor = COLOR_BG_BOTTOM_BTN;
+      // wait till amount is reached
+      delay(translateWateringAmount(wateringAmountCat[i]));
+      // set pump off and write pref
+      switch(i) {
+        case 0:
+          digitalWrite(PUMP_1, HIGH);
+          break;
+        case 1:
+          digitalWrite(PUMP_2, HIGH);
+          break;
+        case 2:
+          digitalWrite(PUMP_3, HIGH);
+          break;
+        case 3:
+          digitalWrite(PUMP_4, HIGH);
+          break;
       }
-      break;
+      // adjust remainingWater
+      switch(wateringAmountCat[i]) {
+        case 1:
+          remainingWaterML -= 25;
+          break;
+        case 2:
+          remainingWaterML -= 50;
+          break;
+        case 3:
+          remainingWaterML -= 75;
+          break;
+        default:
+          remainingWaterML -= 100;
+          break;
+      }
+      // adjust nextWatering
+      nextWateringH[i] = translateWateringFreq(wateringFreqCat[i]);
+    }
+    // wait a little between pumps
+    delay(100);
   }
-  tft.drawXBitmap(xpos, ypos, icon, iconWidthBig, iconHeightBig, fgcolor, bgcolor);    
-}
-
-void showBtnTClicked() {
-//***************************************************************************************************
-//  
-//***************************************************************************************************
-  tft.fillRect(LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH, 0,
-               LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT / 2, 
-               COLOR_BG_TOP_BTN_PRESS);
-  switch(currentScreen) {
-    case scrMain:
-      showButtonIcon(TOP_BUTTON, iconRefill, TFT_SKYBLUE);
-      break;
-  }
-  delay(200);
-  tft.fillRect(LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH, 0,
-               LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT / 2, 
-               COLOR_BG_TOP_BTN);
-  btnTClicked = false;
-  switch(currentScreen) {
-    case scrMain:
-      showButtonIcon(TOP_BUTTON, iconRefill, TFT_SKYBLUE);
-      break;
-  }
-}
-
-void showBtnBClicked() {
-//***************************************************************************************************
-//  
-//***************************************************************************************************
-  tft.fillRect(LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT / 2,
-               LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT - (LAYOUT_LANDSCAPE_HEIGHT / 2), 
-               COLOR_BG_BOTTOM_BTN_PRESS);
-  delay(200);
-  tft.fillRect(LAYOUT_LANDSCAPE_WIDTH - LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT / 2,
-               LAYOUT_BUTTON_WIDTH, LAYOUT_LANDSCAPE_HEIGHT - (LAYOUT_LANDSCAPE_HEIGHT / 2), 
-               COLOR_BG_BOTTOM_BTN);
-  btnBClicked = false;
+  showAndPublishWaterLevel();;  
+  prefs.begin("nanny", false);
+  prefs.putUInt(PREF_P1_NEXT_WATERING, nextWateringH[0]);
+  prefs.putUInt(PREF_P2_NEXT_WATERING, nextWateringH[1]);
+  prefs.putUInt(PREF_P3_NEXT_WATERING, nextWateringH[2]);
+  prefs.putUInt(PREF_P4_NEXT_WATERING, nextWateringH[3]);
+  prefs.end();
 }
 
 void getNetworkTime() {
@@ -614,7 +735,7 @@ void connectAndShowMQTTStatus() {
 
   mqttClient.setServer(SECRET_MQTT_BROKER, SECRET_MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
-  if (mqttClient.connect(mqttClientID, SECRET_MQTT_USER, SECRET_MQTT_PASSWORD)) {
+  if (mqttClient.connect(mqttClientID + NANNY_NUMBER, SECRET_MQTT_USER, SECRET_MQTT_PASSWORD)) {
     mqttConnected = true;
     color = TFT_GREEN;
     mqttSubscribeToTopics();
@@ -674,7 +795,7 @@ void showAndPublishWaterLevel() {
 
   int percent;
 
-  percent = containerSize / remainingWater * 100;
+  percent = remainingWaterML / translateContainerSize(containerSizeCat) * 100;
   if(percent < 10) {
     color = TFT_RED;
   } else if(percent < 30) {
@@ -684,10 +805,10 @@ void showAndPublishWaterLevel() {
   }
   tft.drawXBitmap(xpos, ypos, iconContainer, iconWidthSmall, iconHeightSmall, color, COLOR_BG_INFO_BAR);
   
-  mqttPublishValue(mqttTopicWaterLevel, String(remainingWater));
+  mqttPublishValue(mqttTopicWaterLevel, String(remainingWaterML));
 
   prefs.begin("nanny", false);
-  prefs.putUInt(PREF_REMAINING_WATER, remainingWater);
+  prefs.putUInt(PREF_REMAINING_WATER, remainingWaterML);
   prefs.end();  
 }
 
@@ -702,14 +823,19 @@ void showContainerSize() {
 
   String containerChar;
 
-  if(containerSize == CONTAINER_SIZE_SMALL){
-    containerChar = "S";
-  } else if (containerSize == CONTAINER_SIZE_TALL){
-    containerChar ="T";
-  } else if (containerSize == CONTAINER_SIZE_FLAT){
-    containerChar ="F";
-  } else {
-    containerChar ="B";
+  switch(containerSizeCat) {
+    case 1:
+      containerChar = "S";
+      break;
+    case 2:
+      containerChar = "T";
+      break;
+    case 3:
+      containerChar = "F";
+      break;
+    default:
+      containerChar = "B";
+      break;
   }
   
   tft.setTextColor(COLOR_FG_INFO_BAR, COLOR_BG_INFO_BAR);
@@ -763,6 +889,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String shortenedTopic;
   int pump;
   String shortenedPumpTopic;
+  int intValue;
   
   topicPrefix = mqttMainTopic;
   topicPrefix.concat("/");
@@ -774,6 +901,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   payload[length] = '\0';
   String stringValue = String((char*) payload);
+  intValue = stringValue.toInt();
 
   Serial.print("MQTT callback:   ");
   Serial.print(topicString);
@@ -782,13 +910,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   if(shortenedTopic == mqttCmndContainer) {
     prefs.begin("nanny", false);
-    prefs.putUInt(PREF_CONTAINER_SIZE, stringValue.toInt());
+    prefs.putUInt(PREF_CONTAINER_SIZE, intValue);
     prefs.end();
+    containerSizeCat = intValue;
   } else {
     if(shortenedTopic == mqttCmndWater) {
       prefs.begin("nanny", false);
-      prefs.putUInt(PREF_REMAINING_WATER, stringValue.toInt());
+      prefs.putUInt(PREF_REMAINING_WATER, intValue);
       prefs.end();
+      remainingWaterML = intValue;
     } else {
       pump = shortenedTopic.toInt();    // returns 0 if no number is found
       if(pump <= 0 || pump > NUMBER_OF_PUMPS) {
@@ -800,53 +930,56 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
           prefs.begin("nanny", false);
           switch(pump) {
             case 1:
-              prefs.putUInt(PREF_P1_WATERING_FREQ, stringValue.toInt());        
+              prefs.putUInt(PREF_P1_WATERING_FREQ, intValue);
               break;
             case 2:
-              prefs.putUInt(PREF_P2_WATERING_FREQ, stringValue.toInt());        
+              prefs.putUInt(PREF_P2_WATERING_FREQ, intValue);        
               break;
             case 3:
-              prefs.putUInt(PREF_P3_WATERING_FREQ, stringValue.toInt());        
+              prefs.putUInt(PREF_P3_WATERING_FREQ, intValue);        
               break;
             case 4:
-              prefs.putUInt(PREF_P4_WATERING_FREQ, stringValue.toInt());        
+              prefs.putUInt(PREF_P4_WATERING_FREQ, intValue);        
               break;
           }
           prefs.end();
+          wateringFreqCat[pump] = intValue;
         } else if(shortenedPumpTopic == mqttCmndNext) {
           prefs.begin("nanny", false);
           switch(pump) {
             case 1:
-              prefs.putUInt(PREF_P1_NEXT_WATERING, stringValue.toInt());        
+              prefs.putUInt(PREF_P1_NEXT_WATERING, intValue);        
               break;
             case 2:
-              prefs.putUInt(PREF_P2_NEXT_WATERING, stringValue.toInt());        
+              prefs.putUInt(PREF_P2_NEXT_WATERING, intValue);        
               break;
             case 3:
-              prefs.putUInt(PREF_P3_NEXT_WATERING, stringValue.toInt());        
+              prefs.putUInt(PREF_P3_NEXT_WATERING, intValue);        
               break;
             case 4:
-              prefs.putUInt(PREF_P4_NEXT_WATERING, stringValue.toInt());        
+              prefs.putUInt(PREF_P4_NEXT_WATERING, intValue);        
               break;
           }
-          prefs.end();  
+          prefs.end();
+          nextWateringH[pump] = intValue;
         } else if(shortenedPumpTopic == mqttCmndAmount) {
           prefs.begin("nanny", false);
           switch(pump) {
             case 1:
-              prefs.putUInt(PREF_P1_WATERING_AMOUNT, stringValue.toInt());        
+              prefs.putUInt(PREF_P1_WATERING_AMOUNT, intValue);        
               break;
             case 2:
-              prefs.putUInt(PREF_P2_WATERING_AMOUNT, stringValue.toInt());        
+              prefs.putUInt(PREF_P2_WATERING_AMOUNT, intValue);        
               break;
             case 3:
-              prefs.putUInt(PREF_P3_WATERING_AMOUNT, stringValue.toInt());        
+              prefs.putUInt(PREF_P3_WATERING_AMOUNT, intValue);        
               break;
             case 4:
-              prefs.putUInt(PREF_P4_WATERING_AMOUNT, stringValue.toInt());        
+              prefs.putUInt(PREF_P4_WATERING_AMOUNT, intValue);        
               break;
           }
-          prefs.end();  
+          prefs.end();
+          wateringAmountCat[pump] = intValue;
         } else {
           Serial.print("MQTT callback:   pump ");
           Serial.print(pump);
@@ -908,12 +1041,10 @@ void buttonsInit() {
 //  
 //***************************************************************************************************
   btnT.setPressedHandler([](Button2 & b) {
-    Serial.println("Top button clicked");
     btnTClicked = true;
   });
 
   btnB.setPressedHandler([](Button2 & b) {
-    Serial.println("Bottom button clicked");
     btnBClicked = true;
   });  
 }
@@ -922,15 +1053,16 @@ void setTimerAndGoToSleep() {
 //***************************************************************************************************
 //  set alarm clock to the next full hour (if no internet connection exists then just 1 hour)
 //***************************************************************************************************
-  const unsigned long uSToSecondsFactor = 1000000;
-  unsigned long sleepingSeconds = 60 * 60;          // one hour
+  unsigned long sleepingSeconds;
 
   if(wifiConnected) {
     sleepingSeconds = (59 - minute()) * 60 + (59 - second());
+    sleepingSeconds += TIMER_DRIFT_COMPENSATION;
     Serial.print("going to sleep for ");
-    Serial.print(sleepingSeconds + TIMER_DRIFT_COMPENSATION);
+    Serial.print(sleepingSeconds);
     Serial.println(" seconds");
   } else {
+    sleepingSeconds = 60 * 60;
     Serial.println("going to sleep for one hour");
   }
 
@@ -938,7 +1070,7 @@ void setTimerAndGoToSleep() {
   tft.writecommand(TFT_SLPIN);
   int err = esp_wifi_stop();
   // wakeup on timer
-  esp_sleep_enable_timer_wakeup((sleepingSeconds + TIMER_DRIFT_COMPENSATION) * uSToSecondsFactor);
+  esp_sleep_enable_timer_wakeup((sleepingSeconds) * 1000000ul);
   // also wakeup on top button
   esp_sleep_enable_ext1_wakeup(GPIO_SEL_35, ESP_EXT1_WAKEUP_ALL_LOW);
   esp_deep_sleep_start();

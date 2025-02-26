@@ -2,6 +2,9 @@
 //  settings:     Adapt to your liking.
 //***************************************************************************************************
 
+// system number
+#define NANNY_NUMBER              '2'
+
 // see texts.h for available options
 #define LANG                      'G'   // debug in english, tft as defined here
 
@@ -47,33 +50,26 @@ const char* mqttPassword =        SECRET_MQTT_PASSWORD;
 // timezone
 const char* timezone =            "Europe/Berlin";
 
-// system number
-#define NANNY_NUMBER              '1'   // also change mqttClientID
-
 // water container sizes in milli liter (IKEA 365+)
-#define CONTAINER_SIZE_SMALL      2000
-#define CONTAINER_SIZE_TALL       4200
-#define CONTAINER_SIZE_FLAT       5200
-#define CONTAINER_SIZE_BIG        10600
+// full is to the lid
+// 0 is when pump starts to run dry
+#define CONTAINER_SIZE_SMALL      2000  // mqtt value 1
+#define CONTAINER_SIZE_TALL       3000  // mqtt value 2
+#define CONTAINER_SIZE_FLAT       5200  // mqtt value 3
+#define CONTAINER_SIZE_BIG        8000  // mqtt value 4
 
-// pump runs dry below this amount of water
-#define PUMP_RUNS_DRY             200
+// water pump througput for defined amounts in milliseconds
+#define PUMP_25ML                 1100  // mqtt value 1
+#define PUMP_50ML                 1800  // mqtt value 2
+#define PUMP_75ML                 2400  // mqtt value 3
+#define PUMP_100ML                2800  // mqtt value 4
 
-// water pump througput in milli liter / second
-#define PUMP_BLACK                69  // i.e. 250l/h
-
-// watering frequencies
-#define WATERING_FREQ_OFF         0
-#define WATERING_FREQ_VERY_SELDOM 72    // every third day
-#define WATERING_FREQ_SELDOM      48    // every other day
-#define WATERING_FREQ_NORMAL      24    // daily
-#define WATERING_FREQ_OFTEN       12    // twice a day
-
-// watering amount
-#define WATERING_AMOUNT_A_LOT     4.0   // 4 seconds
-#define WATERING_AMOUNT_MORE      3.0   // 3 seconds
-#define WATERING_AMOUNT_NORMAL    2.0   // 2 seconds
-#define WATERING_AMOUNT_A_LITTLE  1.0   // 1 seconds
+// watering frequencies in hours
+#define WATERING_FREQ_OFF         0     // mqtt value 0
+#define WATERING_FREQ_VERY_SELDOM 168   // mqtt value 1
+#define WATERING_FREQ_SELDOM      72    // mqtt value 2
+#define WATERING_FREQ_NORMAL      48    // mqtt value 3
+#define WATERING_FREQ_OFTEN       24    // mqtt value 4
 
 // preference names
 #define PREF_CONTAINER_SIZE       "cs"
@@ -93,17 +89,18 @@ const char* timezone =            "Europe/Berlin";
 #define PREF_P4_WATERING_AMOUNT   "p4wa"
 
 // default values
-#define DEFAULT_WATERING_FREQ     24    // every day
-#define DEFAULT_WATERING_AMOUNT   2.0   // 2 seconds
+#define DEFAULT_CONTAINER_SIZE    2     // tall
+#define DEFAULT_WATERING_FREQ     3     // every third day
+#define DEFAULT_WATERING_AMOUNT   2     // 50ml
 
 // how many seconds of inactivity to go to sleep
 #define INACTIVITY_THRESHOLD      15
 
 // drift compensation for esp_sleep_enable_timer_wakeup for one hour in seconds
-#define TIMER_DRIFT_COMPENSATION  27
+#define TIMER_DRIFT_COMPENSATION  0
 
 // MQTT settings
-const char* mqttClientID =        "PlantNanny1";
+const char* mqttClientID =        "PlantNanny";
 const char* mqttMainTopic =       "plant-nanny";          // followed by /NANNY_NUMBER
 const char* mqttTopicWaterLevel = "water-level";
 const char* mqttTopicBatVoltage = "battery-value";
@@ -115,13 +112,13 @@ const char* mqttCmndWater =       "command-water";        // resets remaining wa
 
 //***************************************************************************************************
 //  user interface
-//  TFT_WIDTH is the short side of the TTGO display
+//  TFT_WIDTH is the short side of the TTGO display (135 x 240 pixel)
 //***************************************************************************************************
 #define LAYOUT_LANDSCAPE_WIDTH    TFT_HEIGHT              // redefinition to make things easier
 #define LAYOUT_LANDSCAPE_HEIGHT   TFT_WIDTH               // redefinition to make things easier
-#define LAYOUT_BUTTON_WIDTH       64
-#define LAYOUT_INFO_BAR_HEIGHT    24
-#define LAYOUT_STATUS_BAR_HEIGHT  15
+#define LAYOUT_BUTTON_WIDTH       40
+#define LAYOUT_INFO_BAR_HEIGHT    22
+#define LAYOUT_STATUS_BAR_HEIGHT  13
 #define LAYOUT_X_POS_ADJUST       8                         // icons in status bar shifted left
 
 //  two buttons
@@ -160,9 +157,8 @@ const char* mqttCmndWater =       "command-water";        // resets remaining wa
 #define COLOR_BG_STATUS_BAR       TFT_DARKGREEN
 #define COLOR_BG_TOP_BTN          TFT_OLIVE
 #define COLOR_BG_BOTTOM_BTN       TFT_MAROON
-#define COLOR_BG_TOP_BTN_PRESS    0x5AE4                    // RGB =  95,  95,  32
-#define COLOR_BG_BOTTOM_BTN_PRESS 0x5904                    // RGB =  95,  32,  32
 #define COLOR_BG_MAIN_AREA        TFT_GREEN
+#define COLOR_BUTTON_PRESSED      TFT_BLACK
 // foreground colors
 #define COLOR_FG_INFO_BAR         TFT_WHITE
 #define COLOR_FG_STATUS_BAR       TFT_WHITE
